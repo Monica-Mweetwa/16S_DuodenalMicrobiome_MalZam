@@ -1,0 +1,161 @@
+---
+title: "Data Cleaning"
+author: Monica N Mweetwa
+date: 14/08/2024
+---
+Set working directory
+```{r setup}
+   #knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/BEECH_16s_Analysis")) 
+   knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/BEECH_16s_Analysis")) 
+```
+
+1. Data Cleaning
+```{r}
+load("Data/RData/Zambia_EE_BEECH_16s_absQuant_forMonica.RData")
+#this RData fle contains:
+#map - mapping file
+#ps2 - phyloseq object
+
+library(readr)
+library(data.table) ## to use %like% function
+library(tidyverse)
+SamBeechMetadata <- read_csv("Data/RData/SamBeechMetadata22.csv")
+beech_morph <- read_csv("Data/Morphometry/BEECHmorphometry_91_edited.csv")
+sam_morph <- read_csv("Data/Morphometry/SAM_morphometry.csv")
+
+beech_morph2 <- beech_morph %>% 
+  mutate(HIV_status2 = ifelse(hiv == 2, 1, hiv)) %>%
+  mutate_at(vars(c('VH', 'CD', 'ESA', 'MM', 'HIV_status2')),
+              as.numeric)
+sam_morph2 <- sam_morph %>% rename('vpmm' = 'ESA') %>% mutate(PID = as.character(PID))
+morph_dat <- full_join(sam_morph2, beech_morph2)
+dat <- SamBeechMetadata %>%
+    mutate_at(vars(c('AgeMonths_endo', 'WAZ_endo', 'LAZ_endo', 'WHZ_endo', 'HIV_status', 'GastricPh_endo', 'GLP.2_endo', 'I.FABP_endo', 'LPS_endo', 'LBP_endo', 'sCD14_endo')),
+              as.numeric) %>%
+  mutate(I.FABP_new = I.FABP_endo/1000,
+         sCD14_new = sCD14_endo/1000) 
+dat1 <- left_join(dat, morph_dat)
+dat2 <- dat1 %>%
+  mutate(HIV_status = ifelse(mal.type == "Stunting", HIV_status2, HIV_status)) %>%
+  mutate(hiv_char = ifelse(HIV_status == 0, "Negative", "Positive"))
+##rename the SAM children to match the data in the other files
+dat2$SampleID <- ifelse(dat2$SampleID %like% "DryaspirateGC", dat2$SampleID, paste0("Zambia",dat2$SampleID)) 
+write.csv(dat2, "Data/Final_Metadata.csv")
+#combine with the mapping file from phyloseq object
+map <- map %>%
+  mutate(SampleID = sampleID)
+map_table <- left_join(map, dat2)
+map_tab <- map_table %>% 
+  tibble::column_to_rownames("sampleID") 
+
+#add new metadata table to phyloseq object
+library(phyloseq)
+sample_data(ps2) <- map_tab
+
+#remove bacteria with  
+ps0 = subset_taxa(ps2, Kingdom == "Bacteria") # remove those with no taxonomic assignment
+ps0 = subset_taxa(ps0, Family != "Mitochondria") #remove those assigned as Mitochondria Family
+ps0 = subset_taxa(ps0, Class != "Chloroplast") #remove those assigned as Chloroplast Class 
+ps0
+
+#Add sequence information to phyloseq object using the taxonomy tables
+Taxtab<- ASVnames %>%
+  rownames_to_column(var = "row_names") %>%
+  select(row_names, ASVSeq) %>%
+  mutate(seq.name = paste0(">",row_names)) %>%
+  select(seq.name, ASVSeq) %>%
+  rename('ASVSeq' = 'seq.text') %>%
+  filter(seq.name != ">ASV1_Alicyclobacillus acidiphilus")
+library(phylotools)
+library(seqinr)
+library(ape)
+library(msa) 
+library(stringr)
+dat2fasta(Taxtab, outfile = "Data/RData/Sequences.fasta")
+seq <- readAAStringSet("Data/RData/Sequences.fasta")   
+## Perform multiple sequence alignment
+my_alignment <- msa(seq)
+
+## Compute distance matrix
+my_alignment_sequence <- msaConvert(my_alignment, type="seqinr::alignment")
+
+distance_alignment <- dist.alignment(my_alignment_sequence)
+
+## compute phylogenetic tree using neighbor joining
+Tree <- bionj(distance_alignment)
+#Rename tip.labels of tree to match the names of phyloseq taxa
+Tree2 <- Tree
+Tree2$tip.label <- str_sub(Tree2$tip.label, start = 2)
+write.tree(Tree2, "Data/RData/Tree.tre")
+
+phy_tree(ps0) <- Tree2
+ps0
+
+save(ps0, file = "Data/RData/phyloseq_dataset_species.RData")
+
+#Save separately
+ps0_st = subset_samples(ps0, mal.type == "Stunting") # stunting
+save(ps0_st, file = "Data/RData/phyloseq_dataset_stunting.RData")
+ps0_sm = subset_samples(ps0, mal.type == "SAM") # SAM
+save(ps0_sm, file = "Data/RData/phyloseq_dataset_sam.RData")
+```
+
+Create input for picrust2
+```{r}
+load("Data/RData/phyloseq_dataset_species.RData") #merged data
+
+library(biomformat);packageVersion("biomformat")
+library(phyloseq)
+library(tidyverse)
+
+#1. export count table with ASV id rowname
+tax_duod <- as(tax_table(ps0),"matrix")%>%
+  as.data.frame() %>% rownames_to_column(var = "rownam")
+otu_duod <- t(as(otu_table(ps0),"matrix")) %>% # 't' to transform if taxa_are_rows=FALSE
+  as.data.frame() %>% rownames_to_column(var = "rownam") 
+otu_duod <- right_join(tax_duod %>% select(rownam, ASVName), 
+                       otu_duod) %>% 
+  column_to_rownames(var = "ASVName") %>% select(-rownam)
+tax_duod1 <- tax_duod %>% column_to_rownames(var = "ASVName") %>%
+  select(Kingdom, Phylum, Class, Order, Family, Genus, Species)  
+
+#rename otu table to ASVids
+otu_duod2 <- otu_duod %>%
+  replace(is.na(.), 0) %>% 
+  as.matrix() 
+otu_biom<-make_biom(data=otu_duod2)
+write_biom(otu_biom,"Data/Picrust2/Picrust2_biom.biom")
+
+#2. Put sequences for each ASV in fasta file
+library(scifer)
+df_to_fasta(
+    sequence_name = tax_duod$ASVName,
+    sequence_strings = tax_duod$ASVSeq,
+    file_name = "BEECH_SAM_sequences.fna",
+    output_dir = "Data/Picrust2",
+    save_fasta = TRUE
+)
+
+#save tax table
+write_csv(tax_duod1, "Data/Picrust2/Picrust2_tax.csv")
+
+
+###The picrust2 pipeline should be executed on windows computer
+```
+
+Table 1: Sample Characteristics
+```{r}
+load("Data/RData/phyloseq_dataset_species.RData") #ps0
+library(readr)
+library(data.table) ## to use %like% function
+library(tidyverse)
+
+#Median IQR
+#Variables of interest
+tab1vars <- c('Sex', 'hiv_char', 'AgeMonths_endo', 'WAZ_endo', 'LAZ_endo', 'WHZ_endo', 'CD', 'VH', 'ESA', 'GLP.2_endo','GastricPh_endo', 'I.FABP_new', 'LPS_endo', 'LBP_endo', 'sCD14_new')
+
+tab1 <- tableone::CreateTableOne(data=dat2, vars=tab1vars, strata= c("mal.type"))
+tab1 <- as.data.frame(print(tab1, nonnormal=tab1vars, contDigits=1))
+tab1 <- tibble::rownames_to_column(tab1, "row_names")
+write.csv(tab1, "Output/DescriptiveTable_all.csv")
+```
