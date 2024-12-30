@@ -3,8 +3,9 @@ This repository contains the code used to analyse 16S RNA sequencing data from d
 
 ## Summary
 This repository holds the code for 2 analyses:
-•	A retrospective cross-sectional study using samples collected during the conduct of previously reported studies on hospitalized children with SAM at the university teaching hospital (Lusaka, Zambia) and stunted children from a high-density community in Lusaka known to have with a high risk of malnutrition and enteropathy. 
-•	A meta-analysis of all publicly available duodenal microbiome 16s data on undernourished children retrieved from SRA Archive.
+
+* A retrospective cross-sectional study using samples collected during the conduct of previously reported studies on hospitalized children with SAM at the university teaching hospital (Lusaka, Zambia) and stunted children from a high-density community in Lusaka known to have with a high risk of malnutrition and enteropathy.
+* A meta-analysis of all publicly available duodenal microbiome 16s data on undernourished children retrieved from SRA Archive.
 
 ## Description of Datasets:
 ### Zambian Datasets:
