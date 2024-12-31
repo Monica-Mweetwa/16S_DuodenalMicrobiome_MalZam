@@ -54,6 +54,50 @@ lin_uni_func2 = function(equation,data){
   print(coef)
 }
 
+#Get linear model taxa vs malnutrition class
+lm_mod_func = function(var,data,rank){
+  require(microViz)
+  mod_lm <- data %>%
+    tax_fix() %>%
+    tax_transform("compositional", rank = rank) %>%
+    taxatree_models(type = "lm", 
+                    rank = "Phylum",
+                    trans = "log2", 
+                    trans_args = list(zero_replace = "halfmin"),
+                    variables = c(var))
+  lm_stats <- taxatree_models2stats(mod_lm)
+  lm_stats <- taxatree_stats_p_adjust(data = lm_stats, method = "BY", grouping = "rank")
+  lm_stats2 <- lm_stats %>% taxatree_stats_get()%>% filter(p.adj.BY.rank < 0.05)
+  print(lm_stats2)
+}
+
+#Linear models of taxa with clinical features
+lm_mod_func_cl_rel = function(var,data, rank){
+  require(microViz)
+  mod_lm <- data %>%
+    tax_fix() %>%
+    tax_transform("compositional", rank = rank) %>%
+    taxatree_models(type = "lm", 
+                    rank = rank,
+                    trans = "log2", 
+                    trans_args = list(zero_replace = "halfmin"),
+                    variables = c(var))
+  lm_stats <- taxatree_models2stats(mod_lm)
+  lm_stats <- taxatree_stats_p_adjust(data = lm_stats, method = "BY", grouping = "rank")
+  lm_stats2 <- lm_stats %>% taxatree_stats_get() %>% filter(`p.adj.BY.rank` < 0.05) %>% filter(term == var)
+  #get prevalence of taxa
+  prop_prev_data <- data %>%
+    tax_fix() %>%
+    tax_transform("compositional", rank = rank) %>%
+    ps_melt() %>%
+    group_by(OTU) %>%
+    summarise(avg_abundance = mean(Abundance),
+              prevalence = sum(Abundance > 0) / dplyr::n()) %>%
+    rename('OTU'='taxon') #might have to swap depening on computer i.e Mac vs windows
+  lm_stat3 <- left_join(lm_stats2, prop_prev_data, by = "taxon")
+  print(lm_stat3)
+}
+
 #function to get output of permanova analysis
 permanova_func = function(equation,data){
   dist = phyloseq::distance(data, method="bray")
