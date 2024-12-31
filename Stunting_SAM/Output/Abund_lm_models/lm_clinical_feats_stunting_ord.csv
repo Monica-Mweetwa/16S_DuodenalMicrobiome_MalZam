@@ -1,0 +1,2 @@
+"","term","taxon","rank","formula","estimate","std.error","statistic","p.value","p.adj.BY.rank","avg_abundance","prevalence"
+"1","GastricPh_endo","Veillonellales-Selenomonadales","Order","`Veillonellales-Selenomonadales`~GastricPh_endo",-0.730775406752741,0.156767651383397,-4.66151913551048,3.30813731184767e-05,0.00854300934760029,0.00551208507005292,0.981132075471698

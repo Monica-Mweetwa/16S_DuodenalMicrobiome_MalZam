@@ -1,0 +1,2 @@
+"","term","taxon","rank","formula","estimate","std.error","statistic","p.value","p.adj.BY.rank","avg_abundance","prevalence"
+"1","GastricPh_endo","Negativicutes","Class","`Negativicutes`~GastricPh_endo",-0.730160959632777,0.156565847013351,-4.6636030370692,3.28634654501621e-05,0.00206750454430297,0.00551208507005292,0.981132075471698
