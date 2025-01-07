@@ -20,7 +20,7 @@ This repository holds the code for 2 analyses:
    Project ID - PRJEB27868	(single-ended amplicons sequenced by Microbiome insights)
 
 ## SAM vs Stunting Analysis
-Almost all children with SAM were stunted but stunted children were not servery malnourished i.e severe wasting (WLZ < -2). The ASV counts and taxonomic identification from fastQ files was done by the WashU team. The code deposited here, details the analysis done to relate this data to metdata (clincal features for these children). A guidance document providing deatiled description of this analysis and data used to implement this is provided: **Stunting_SAM/16S_DuodenalMicrobiome_MalZam_GuidanceDocument.docx**  
+Almost all children with SAM were stunted but stunted children were not severely malnourished i.e severe wasting (WLZ < -2). The ASV counts and taxonomic identification from fastQ files was done by the WashU team. The code deposited here, details the analysis done to relate this data to metdata (clincal features for these children). A guidance document providing deatiled description of this analysis and data used to implement this is provided: **Stunting_SAM/16S_DuodenalMicrobiome_MalZam_GuidanceDocument.docx**  
 
 ## Meta-Analysis of Duodenal Microbiome of stunted children.
 Publicly available fastq files (16S) of the duodenal microbiome were retrieved from SRA archive and compared with the Zambian dataset to understand if geography had an impact of the compositon and diversity. This analysis was restried to children with LAZ < -2. 
