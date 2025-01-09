@@ -1,0 +1,289 @@
+---
+title: "Create phyloseq object for Afrobiota and Bangaldesh data"
+---
+Set working directory
+```{r setup}
+   #knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/BEECH_16s_Analysis/Meta-Analysis")) 
+   knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/BEECH_16s_Analysis/Meta-Analysis")) 
+```
+
+
+Creating absolute abundance tables excluding the acyclobacillus
+
+```{r}
+rm(list=ls())
+
+# Load libraries
+library("phyloseq") # version "1.44.0" 
+library("tidyverse") # version "2.0.0" 
+library("dada2") # version "1.28.0" 
+library("msa") # version "1.32.0" 
+library("ips") # version "0.0.11" 
+library("phangorn")  # version "2.11.1" 
+library("vegan")  # version "2.6.4" 
+library("plyr")  # version "1.8.9" 
+library("DESeq2")  # version "1.40.2" 
+
+# Set random seed for reproducibility purposes
+set.seed(100)
+
+```
+
+
+Import data
+```{r}
+#count tables
+load("Data/RData/ExtDat_Bang_CountTab.RData") #Count table
+rownames(seqtab.nochim.bang) <- paste0("BNG_", rownames(seqtab.nochim.bang))
+load("Data/RData/ExtDat_Afr_CountTab.RData") #Count table
+rownames(seqtab.nochim.afr) <- paste0("AFR_", rownames(seqtab.nochim.afr))
+load("Data/RData/ExtDat_SEEM_CountTab.RData") #Count table
+rownames(seqtab.nochim.seem) <- paste0("SEEM_", rownames(seqtab.nochim.seem))
+
+#Taxonomy tables
+load("Data/RData/EXtDat_Bang_TaxTab.RData") #Taxonomy table
+load("Data/RData/EXtDat_Afr_TaxTab.RData") #Taxonomy table
+load("Data/RData/EXtDat_SEEM_TaxTab.RData") #Taxonomy table
+#metadata
+metadata <- readxl::read_excel("Data/ExtDataMetadata.xlsx")
+```
+
+Merge Sequence Tables
+```{r}
+st.all <- mergeSequenceTables(seqtab.nochim.bang, seqtab.nochim.afr, seqtab.nochim.seem) # dim 619 7181
+# Check orientations (looking for all-TACG variants, not CCTG variants)
+table(substr(colnames(st.all), start = 0, stop = 4))
+asv <- as.data.frame(st.all)
+
+# Find columns with 0 count and remove
+colsums_asv_combo <- colSums(asv)
+colsums_asv_combo_not0 <- colsums_asv_combo[colsums_asv_combo > 0]
+
+asv_final <- asv[, names(colsums_asv_combo_not0)]
+
+write.table(asv_final, "Data/st_all.txt", sep = "\t", quote = F)
+```
+
+Merge taxonomy tables
+```{r}
+tax <- rbind(taxa.afr, taxa.bang, taxa.seem)
+
+# Filter taxa.silva.plus to remove taxa filtered in the last step
+all.equal(rownames(tax), colnames(asv_final))
+taxa.silva.plus_filtered <- tax[names(colsums_asv_combo_not0), ]
+all.equal(rownames(taxa.silva.plus_filtered), colnames(asv_final))
+
+### Create ASVnames
+ASVnames <- cbind(taxa.silva.plus_filtered,
+                  ASVSeq = rownames(taxa.silva.plus_filtered),
+                  ASVName = paste('ASV', 1:nrow(taxa.silva.plus_filtered), sep = ''),
+                  ASVTaxa = rep('', nrow(taxa.silva.plus_filtered)),
+                  ASVReadable = rep('', nrow(taxa.silva.plus_filtered)))
+ASVnames <- as.data.frame(ASVnames, stringsAsFactors = FALSE)
+
+### Get highest resolution taxonomic annotation
+for(i in 1:nrow(taxa.silva.plus_filtered)){
+  # Get annotation from silva plus
+  current_anno <- taxa.silva.plus_filtered[i, ]
+  # Figure out highest taxonomic resolution
+  highest_res <- current_anno[!is.na(current_anno)]
+  # Create a conditional to get species annotation, otherwise highest annotation possible
+  if(length(highest_res) == 7){
+    ASVnames$ASVTaxa[i] <- paste(highest_res[6], highest_res[7])
+  } else if(length(highest_res) > 1){
+    ASVnames$ASVTaxa[i] <- highest_res[length(highest_res)]
+  } else if(length(highest_res) == 1){
+    ASVnames$ASVTaxa[i] <- "Unannotated_bacteria"
+  } else if(length(highest_res) == 0){
+    ASVnames$ASVTaxa[i] <- 'Unannotated'
+  }
+}
+ASVnames$ASVReadable <- paste(ASVnames$ASVName, '_', ASVnames$ASVTaxa, sep = '')
+rownames(ASVnames) <- ASVnames$ASVReadable
+
+### Align asv with the new naming system
+all.equal(colnames(asv_final), ASVnames$ASVSeq)
+colnames(asv_final) <- rownames(ASVnames)
+```
+
+Create a basic mapping file and phyloseq object
+```{r}
+map <- data.frame(rownames(asv_final))
+colnames(map)[1] <- "sampleID"
+rownames(map) <- map$sampleID
+#join with sample data
+map2 <- left_join(map, metadata)
+
+#Make phyloseq object
+library(phyloseq)
+ps <- phyloseq(
+  tax_table(as.matrix(ASVnames)),
+  sample_data(map2 %>% data.frame(row.names = 1)),
+  otu_table(asv_final, taxa_are_rows = FALSE)
+)
+```
+
+Remove spike-in data and get absolute abundance
+```{r}
+## 1. Convert ps to relative abundance
+ps.ra <- transform_sample_counts(ps, function(x){x/sum(x)})
+
+## 2. Export ps.ra otu_table as data frame
+asv.ra <- as.data.frame(ps.ra@otu_table)
+
+## 3. Sum all spike-in ASVs from asv.ra
+# separate the spike-in ASVs from asv.ra
+# Identify columns containing "Alicyclobacillus" in their names
+cols_containing_alicyclobacillus <- grep("Alicyclobacillus", colnames(asv.ra))
+
+# Subset the matrix to include only these columns
+asv.ra.spike <- asv.ra[, cols_containing_alicyclobacillus] # 12 in total
+
+# Sum the values in each column
+asv.ra.spike$ASV_spike_ra_sum <- rowSums(asv.ra.spike)
+
+## 4. Calculate bacterial load ((1-spikein.ra)/spikein.ra)
+asv.ra.spike$bac_load_factor <- (1-asv.ra.spike$ASV_spike_ra_sum)/asv.ra.spike$ASV_spike_ra_sum  
+
+#### Rationale for estimation of spike-in cells added 
+# The concentration of A. acidiphilus spike-in is 2.2 x 10^8 cells/mL in PBS
+# We added 60 uL of spike-in for 100 uL of aspirate (for EEBiomarker samples; 200uL for BEECH samples)
+# The total amount of spike-in added to each sample = (1.65 * 10^7)/(1000/60) = 9.9*10^5 cells per 100 uL aspirate (for Amaze samples; 200uL BEECH)
+# Multiply by 10 to get 16S copies per mL aspirate (5 for BEECH)
+asv.ra.spike$AAcellsAdded <- 990000
+# multiplytoML: Multiply by 10 to convert to mililiter
+asv.ra.spike$multiplytoML <- 10
+# Bacterial load
+asv.ra.spike$bac_load <- asv.ra.spike$bac_load_factor * (asv.ra.spike$multiplytoML * asv.ra.spike$AAcellsAdded)
+
+# Add bac_load to map file
+sample_data(ps)$bacterial_load <- asv.ra.spike$bac_load
+sample_data(ps.ra)$bacterial_load <- asv.ra.spike$bac_load
+
+## 5. Make raw dataset excluding spike-in ASVs
+### i. Find all columns with spike-in
+spikeCols <- grep("Alicyclobacillus", names(asv_final), value = TRUE)
+
+### ii. Create ps1 which have the spike-ins removed
+f1 <- !rownames(tax_table(ps)@.Data) %in% spikeCols
+ps1 <- prune_taxa(f1, ps)
+# phyloseq-class experiment-level object
+# otu_table()   OTU Table:         [ 1035 taxa and 77 samples ]
+# sample_data() Sample Data:       [ 77 samples by 2 sample variables ]
+# tax_table()   Taxonomy Table:    [ 1035 taxa by 11 taxonomic ranks ]
+
+
+##### Converting Phyloseq object to DeSeq object 
+## A DESeq normalization was applied to the dataset before absolute quantification calculation
+library(BiocGenerics)
+library("DESeq2") 
+dds.ps1 <- phyloseq_to_deseq2(ps1, ~ 1)
+dds.ps1 <- estimateSizeFactors(dds.ps1, type = 'poscounts')
+cts.ps1 <- counts(dds.ps1)
+dds.ps1 <- DESeq(dds.ps1, fitType="local")
+plotDispEsts(dds.ps1)
+
+###### Get absolute abundance of counts > transform to relative abundance
+ctsnorm.ps1 <- DESeq2::counts(dds.ps1, normalized = TRUE) %>% t()
+
+# Make new ps2 with normalized counts
+tax2 <- tax_table(ps1)
+map2 <- sample_data(ps1)
+
+ps2_ext <- phyloseq(
+  tax_table(as.matrix(tax2)),
+  sample_data(map2),
+  otu_table(ctsnorm.ps1, taxa_are_rows = FALSE)
+)
+#Agglomerate at Genus level
+ps2_ext_genus <- tax_glom(ps2_ext, taxrank = "Genus", NArm = TRUE)
+#Rename taxa with genus names
+genus.names <- make.names(tax_table(ps2_ext_genus)[,'Genus'], unique = TRUE)
+taxa_names(ps2_ext_genus) <- genus.names
+ps2_ext_genus 
+ps3_ext_genus <- subset_samples(ps2_ext_genus, SampleType == "Duodenal Samples")
+ps3_ext_genus
+```
+
+Add Zambia dataset
+```{r}
+load("Data/RData/Zambia_EE_BEECH_16s_absQuant_forMonica.RData")
+library(readr)
+library(data.table) ## to use %like% function
+library(tidyverse)
+SamBeechMetadata <- read_csv("Data/SamBeechMetadata_2.csv")
+##rename the SAM children to match the data in the other files
+SamBeechMetadata$SampleID <- ifelse(SamBeechMetadata$SampleID %like% "DryaspirateGC",
+                                    SamBeechMetadata$SampleID,
+                                    paste0("Zambia",SamBeechMetadata$SampleID)) 
+SamBeechMetadata <- SamBeechMetadata %>%
+  mutate(sampleID = SampleID)
+#combine with the mapping file from phyloseq object
+map <- map %>%
+  mutate(SampleID = sampleID)
+map_table <- left_join(map, SamBeechMetadata)
+map_tab <- map_table %>%
+  tibble::column_to_rownames("sampleID") 
+
+#add new metadata table to phyloseq object
+library(phyloseq)
+sample_data(ps2) <- map_tab
+ps2_zam <- ps2
+#Agglomerate at Genus level
+ps2_zam_genus <- tax_glom(ps2_zam, taxrank = "Genus", NArm = TRUE)
+#Rename taxa with genus names
+genus.names <- make.names(tax_table(ps2_zam_genus)[,'Genus'], unique = TRUE)
+taxa_names(ps2_zam_genus) <- genus.names
+ps2_zam_genus 
+```
+
+Merge phyloseq objects and further clean up
+```{r}
+rf_dat <- merge_phyloseq(ps2_zam_genus, ps3_ext_genus)
+rf_dat
+#remove bacteria with  
+ps0 = subset_taxa(rf_dat, Kingdom == "Bacteria") # remove those with no taxonomic assignment
+ps0 = subset_taxa(ps0, Family != "Mitochondria") #remove those assigned as Mitochondria Family
+ps0 = subset_taxa(ps0, Class != "Chloroplast") #remove those assigned as Chloroplast Class 
+ps0
+rf_dat <- ps0
+save(rf_dat, file = "Data/RData/AllMAlStudies.RData")
+
+# Exclude samples
+rf_dat_laz <- rf_dat %>%
+  #remove samples from children with SAM
+  ps_filter(study != "EE children") %>%
+  ps_filter(WLZ > -3) %>%
+  ps_filter(LAZ < -2) %>% # remove samples that are not from stunted children
+  ps_filter(!is.na(LAZ)) #Remove samples with unknown LAZ
+
+#some PIDs have multiple SampleIDs
+rf_dat_laz %>%
+  ps_filter(Country == "Bangladesh")%>%
+  comp_barplot(tax_level = "Genus",
+               label = "SampleID",
+               n_taxa = 15) +
+  facet_grid(
+    cols = vars(PID),
+    scales = "free_x", # this only frees y scale per row in grid faceting
+    space = "free_x" # allows bars to be same size by freeing facet heights
+  ) +
+  theme(legend.position = "bottom",
+        axis.text.x = (element_blank()),
+        axis.ticks.x = (element_blank()))
+ggsave("Output/ST_Combined/Bangladesh_duplicated.png", plot = last_plot(), dpi = 600, device = "png", 
+       width = 12, height = 4, units = "in")
+#the duplicated PID's show similar genera abundance - Average them
+rf_dat_laz_unique <- phyloseq::merge_samples(rf_dat_laz, "PID")
+# replace metadata as NAs get introduced during merging
+meta <- sample_data(rf_dat_laz)
+merged_meta <- meta[!duplicated(meta$PID), ]
+merged_meta$sampleID2 <- rownames(merged_meta)
+rownames(merged_meta) <- NULL
+merged_meta2 <- merged_meta %>% column_to_rownames(var = "PID")
+sample_data(rf_dat_laz_unique) <- merged_meta2
+
+save(rf_dat_laz_unique, file = "Data/RData/StuntingCombined_unique.RData")
+```
+
+#DONE!
