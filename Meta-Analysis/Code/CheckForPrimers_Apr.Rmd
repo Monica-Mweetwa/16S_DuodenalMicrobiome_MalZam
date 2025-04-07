@@ -1,0 +1,244 @@
+---
+title: "Check for primer Sequences"
+author: Monica N Mweetwa
+date: 30/30/2024
+---
+Set working directory
+```{r setup}
+   knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/BEECH_16s_Analysis/Meta-Analysis")) 
+   #knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/BEECH_16s_Analysis/Stunting_SAM")) 
+```
+
+
+***Load packages***
+```{r}
+#BiocManager::install("dada2") #mm - to install the software
+library(dada2); packageVersion("dada2")
+```
+
+1. SEEM
+***Set path to fastq files***
+
+```{r}
+path_seem <- "~/Desktop/fastQ/SEEM" # SEEM dataset
+```
+
+```{r}
+fnFs <- sort(list.files(path_seem, pattern="_1.fastq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path_seem, pattern="_2.fastq.gz", full.names = TRUE))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_1.fastq.gz"), `[`, 1)
+```
+
+Identify primers
+The 515F (forward) and 806R (reverse) primers were used to amplify this dataset. We record the DNA sequences, including ambiguous nucleotides, for those primers.
+
+```{r}
+FWD <- "GTGYCAGCMGCCGCGGTAA"  ## 515f sequence 
+REV <- "GGACTACNVGGGTWTCTAAT"  ## 806r sequence
+```
+
+In theory if you understand your amplicon sequencing setup, this is sufficient to continue. However, to ensure we have the right primers, and the correct orientation of the primers on the reads, we will verify the presence and orientation of these primers in the data.
+
+```{r}
+allOrients <- function(primer) {
+    # Create all orientations of the input sequence
+    require(Biostrings)
+    dna <- DNAString(primer)  # The Biostrings works w/ DNAString objects rather than character vectors
+    orients <- c(Forward = dna, Complement = Biostrings::complement(dna), Reverse = Biostrings::reverse(dna),
+        RevComp = Biostrings::reverseComplement(dna))
+    return(sapply(orients, toString))  # Convert back to character vector
+}
+FWD.orients <- allOrients(FWD)
+REV.orients <- allOrients(REV)
+FWD.orients
+```
+
+We are now ready to count the number of times the primers appear in the forward and reverse read, while considering all possible primer orientations. Identifying and counting the primers on one set of paired end FASTQ files is sufficient, assuming all the files were created using the same library preparation, so we’ll just process the first sample.
+
+```{r}
+library(ShortRead)
+primerHits <- function(primer, fn) {
+    # Counts number of reads in which the primer is found
+    nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
+    return(sum(nhits > 0))
+}
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs[[1]]), FWD.ReverseReads = sapply(FWD.orients,
+    primerHits, fn = fnRs[[1]]), REV.ForwardReads = sapply(REV.orients, primerHits,
+    fn = fnFs[[1]]), REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs[[1]]))
+```
+                    Forward Complement Reverse RevComp
+FWD.ForwardReads  353711          0       0       0
+FWD.ReverseReads       0          0       0       1
+REV.ForwardReads       0          0       0      36
+REV.ReverseReads  364445          0       0       0
+
+There are primers in the sequences
+
+Clear list
+```{r}
+rm(list = ls())
+```
+
+
+2. BEED
+***Set path to fastq files***
+
+```{r}
+path_beed <- "~/Desktop/fastQ/BEED" # BEED dataset
+```
+
+```{r}
+fnFs <- sort(list.files(path_beed, pattern="_R1.fastq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path_beed, pattern="_R2.fastq.gz", full.names = TRUE))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), "_R1.fastq.gz"), `[`, 1)
+```
+
+Identify primers
+The 515F (forward) and 806R (reverse) primers were used to amplify this dataset. We record the DNA sequences, including ambiguous nucleotides, for those primers.
+
+```{r}
+FWD <- "GTGYCAGCMGCCGCGGTAA"  ## 515f sequence 
+REV <- "GGACTACNVGGGTWTCTAAT"  ## 806r sequence
+```
+
+In theory if you understand your amplicon sequencing setup, this is sufficient to continue. However, to ensure we have the right primers, and the correct orientation of the primers on the reads, we will verify the presence and orientation of these primers in the data.
+
+```{r}
+allOrients <- function(primer) {
+    # Create all orientations of the input sequence
+    require(Biostrings)
+    dna <- DNAString(primer)  # The Biostrings works w/ DNAString objects rather than character vectors
+    orients <- c(Forward = dna, Complement = Biostrings::complement(dna), Reverse = Biostrings::reverse(dna),
+        RevComp = Biostrings::reverseComplement(dna))
+    return(sapply(orients, toString))  # Convert back to character vector
+}
+FWD.orients <- allOrients(FWD)
+REV.orients <- allOrients(REV)
+FWD.orients
+```
+
+We are now ready to count the number of times the primers appear in the forward and reverse read, while considering all possible primer orientations. Identifying and counting the primers on one set of paired end FASTQ files is sufficient, assuming all the files were created using the same library preparation, so we’ll just process the first sample.
+
+```{r}
+library(ShortRead)
+primerHits <- function(primer, fn) {
+    # Counts number of reads in which the primer is found
+    nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
+    return(sum(nhits > 0))
+}
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs[[1]]), FWD.ReverseReads = sapply(FWD.orients,
+    primerHits, fn = fnRs[[1]]), REV.ForwardReads = sapply(REV.orients, primerHits,
+    fn = fnFs[[1]]), REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs[[1]]))
+```
+                    Forward Complement Reverse RevComp
+FWD.ForwardReads   27315          0       0       0
+FWD.ReverseReads   33575          0       0       2
+REV.ForwardReads   35094          0       0       0
+REV.ReverseReads   26327          0       0       2
+
+There are primers in the sequences
+Clear list
+```{r}
+rm(list = ls())
+```
+
+
+3. Afribiota
+***Set path to fastq files***
+```{r}
+path_afribiota <- "Data/fastq" # Afribiota dataset
+```
+
+
+```{r}
+fnFs <- sort(list.files(path_afribiota, pattern=".fastq.gz", full.names = TRUE))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), ".fastq.gz"), `[`, 1)
+```
+
+Identify primers
+The several primers are described to have been used to amplify this dataset i.e 8 forward and reverse primers
+
+```{r}
+#Forward primers
+FWD1 <- "AATGATACGGCGACCACCGAGATCTACACATCGTACGTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SA501 sequence
+FWD2 <- "AATGATACGGCGACCACCGAGATCTACACACTATCTGTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SA502 sequence
+FWD3 <- "AATGATACGGCGACCACCGAGATCTACACTAGCGAGTTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SA503 sequence
+FWD4 <- "AATGATACGGCGACCACCGAGATCTACACCTGCGTGTTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SA504 sequence
+FWD5 <- "AATGATACGGCGACCACCGAGATCTACACTCATCGAGTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SA505 sequence
+FWD6 <- "AATGATACGGCGACCACCGAGATCTACACCGTGAGTGTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SA506 sequence
+FWD7 <- "AATGATACGGCGACCACCGAGATCTACACGGATATCTTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SA507 sequence
+FWD8 <- "AATGATACGGCGACCACCGAGATCTACACGACACCGTTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB508 sequence
+FWD9 <- "AATGATACGGCGACCACCGAGATCTACACCTACTATATATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB501 sequence
+FWD10 <- "AATGATACGGCGACCACCGAGATCTACACCGTTACTATATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB502 sequence
+FWD11 <- "AATGATACGGCGACCACCGAGATCTACACAGAGTCACTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB503 sequence
+FWD12 <- "AATGATACGGCGACCACCGAGATCTACACTACGAGACTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB504 sequence
+FWD13 <- "AATGATACGGCGACCACCGAGATCTACACACGTCTCGTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB505 sequence
+FWD14 <- "AATGATACGGCGACCACCGAGATCTACACTCGACGAGTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB506 sequence
+FWD15 <- "AATGATACGGCGACCACCGAGATCTACACGATCGTGTTATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB507 sequence
+FWD16 <- "AATGATACGGCGACCACCGAGATCTACACGTCAGATATATGGTAATTGTGTGCCAGCMGCCGCGGTAA" ## v4.SB508 sequence
+
+#Reverse primers
+REV1 <- "CAAGCAGAAGACGGCATACGAGATAACTCTCGAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA701 
+REV2 <- "CAAGCAGAAGACGGCATACGAGATACTATGTCAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA702
+REV3 <- "CAAGCAGAAGACGGCATACGAGATAGTAGCGTAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA703
+REV4 <- "CAAGCAGAAGACGGCATACGAGATCAGTGAGTAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA704
+REV5 <- "CAAGCAGAAGACGGCATACGAGATCGTACTCAAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA705
+REV6 <- "CAAGCAGAAGACGGCATACGAGATCTACGCAGAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA706
+REV7 <- "CAAGCAGAAGACGGCATACGAGATGGAGACTAAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA707
+REV8 <- "CAAGCAGAAGACGGCATACGAGATGTCGCTCGAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA708
+REV9 <- "CAAGCAGAAGACGGCATACGAGATGTCGTAGTAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA709
+REV10 <- "CAAGCAGAAGACGGCATACGAGATTAGCAGACAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA710
+REV11 <- "CAAGCAGAAGACGGCATACGAGATTCATAGACAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA711 
+REV12 <- "CAAGCAGAAGACGGCATACGAGATTCGCTATAAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SA712 
+REV13 <- "CAAGCAGAAGACGGCATACGAGATAAGTCGAGAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB701 
+REV14 <- "CAAGCAGAAGACGGCATACGAGATATACTTCGAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB702 
+REV15 <- "CAAGCAGAAGACGGCATACGAGATAGCTGCTAAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB703 
+REV16 <- "CAAGCAGAAGACGGCATACGAGATCATAGAGAAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB704 
+REV17 <- "CAAGCAGAAGACGGCATACGAGATCGTAGATCAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB705 
+REV18 <- "CAAGCAGAAGACGGCATACGAGATCTCGTTACAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB706 
+REV19 <- "CAAGCAGAAGACGGCATACGAGATGCGCACGTAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB707 
+REV20 <- "CAAGCAGAAGACGGCATACGAGATGGTACTATAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB708 
+REV21<- "CAAGCAGAAGACGGCATACGAGATGTATACGCAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB709 
+REV22 <- "CAAGCAGAAGACGGCATACGAGATTACGAGCAAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB710 
+REV23 <- "CAAGCAGAAGACGGCATACGAGATTCAGCGTTAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB711 
+REV24 <- "CAAGCAGAAGACGGCATACGAGATTCGCTACGAGTCAGTCAGCCGGACTACHVGGGTWTCTAAT" ## v4.SB712 
+
+#add the other primer sets 
+FWD <- "GTGYCAGCMGCCGCGGTAA"  ## 515f sequence 
+REV <- "GGACTACNVGGGTWTCTAAT"  ## 806r sequence
+```
+
+In theory if you understand your amplicon sequencing setup, this is sufficient to continue. However, to ensure we have the right primers, and the correct orientation of the primers on the reads, we will verify the presence and orientation of these primers in the data.
+* repeat this step and the next for all primers *
+```{r}
+allOrients <- function(primer) {
+    # Create all orientations of the input sequence
+    require(Biostrings)
+    dna <- DNAString(primer)  # The Biostrings works w/ DNAString objects rather than character vectors
+    orients <- c(Forward = dna, Complement = Biostrings::complement(dna), Reverse = Biostrings::reverse(dna),
+        RevComp = Biostrings::reverseComplement(dna))
+    return(sapply(orients, toString))  # Convert back to character vector
+}
+FWD.orients <- allOrients(FWD1)
+REV.orients <- allOrients(REV1)
+FWD.orients
+```
+
+We are now ready to count the number of times the primers appear in the forward and reverse read, while considering all possible primer orientations.
+
+```{r}
+library(ShortRead)
+primerHits <- function(primer, fn) {
+    # Counts number of reads in which the primer is found
+    nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
+    return(sum(nhits > 0))
+}
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs[[1]]), FWD.ReverseReads = sapply(FWD.orients,
+    primerHits, fn = fnFs[[1]]), REV.ForwardReads = sapply(REV.orients, primerHits,
+    fn = fnFs[[1]]), REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnFs[[1]]))
+```
+
+There are no primers in the sequences
