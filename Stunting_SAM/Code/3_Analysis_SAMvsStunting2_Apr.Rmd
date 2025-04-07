@@ -1,0 +1,141 @@
+---
+title: "SAM vs Stunting Analysis - Part 2"
+author: Monica N Mweetwa
+date: 14/08/2024
+---
+Set working directory
+```{r setup}
+   knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/BEECH_16s_Analysis/Stunting_SAM")) #Mac
+   #knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/BEECH_16s_Analysis/Stunting_SAM"))#Windows
+```
+
+load data
+```{r}
+library(phyloseq)
+library(ggpubr)
+library("ggplot2")
+library(tableone)
+library(tidyverse)
+library(microViz)
+library(pals) #for color palette
+source("Code/Functions.R")
+load("Data/RData/phyloseq_dataset_species.RData") #ps0
+ps0_a <- ps0 %>%
+  ps_mutate(mal.type = ifelse(study == "EE children", "SAM", "Stunting only"))
+```
+
+Differential Abundance of microbes
+1. Stunting vs SAM
+
+```{r}
+lm_laz_py <- lm_mod_func(var = "mal.type", data = ps0_a, rank = "Phylum")
+lm_laz_cl <- lm_mod_func(var = "mal.type", data = ps0_a, rank = "Class")
+lm_laz_or <- lm_mod_func(var = "mal.type", data = ps0_a, rank = "Order")
+lm_laz_fm <- lm_mod_func(var = "mal.type", data = ps0_a, rank = "Family")
+lm_laz_gn <- lm_mod_func(var = "mal.type", data = ps0_a, rank = "Genus")
+
+write.csv(lm_laz_py, "Output/Abund_lm_models/lm_SamType_phy.csv")
+write.csv(lm_laz_cl, "Output/Abund_lm_models/lm_SamType_class.csv")
+write.csv(lm_laz_or, "Output/Abund_lm_models/lm_SamType_ord.csv")
+write.csv(lm_laz_fm, "Output/Abund_lm_models/lm_SamType_fam.csv")
+write.csv(lm_laz_gn, "Output/Abund_lm_models/lm_SamType_gen.csv")
+```
+
+Plot significant associations
+```{r}
+gen_plot <- ps0_a %>%
+  tax_fix() %>%
+  tax_transform("compositional", rank = "Genus") %>%
+  ps_get() %>%
+  ps_otu2samdat(c("[Eubacterium] nodatum group", "Abiotrophia", "Actinomyces", "Atopobium", "Blautia",  "Burkholderia-Caballeronia-Paraburkholderia", "Corynebacterium", 
+                  "Dolosigranulum", "Escherichia-Shigella", "Fusobacterium", "Gemella", 
+                  "Granulicatella", "Johnsonella", "Klebsiella", "Lachnoanaerobaculum", 
+                  "Lachnospiraceae Family", "Lactobacillus", "Limosilactobacillus", 
+                  "Ligilactobacillus", "Mogibacterium", "Neisseria", "Pseudomonas", 
+                  "Ralstonia", "Veillonella")) %>%
+  samdat_tbl() %>%
+  select(PID, mal.type, `[Eubacterium] nodatum group`, `Abiotrophia`, `Actinomyces`, `Atopobium`, `Blautia`,  `Burkholderia-Caballeronia-Paraburkholderia`, `Corynebacterium`, 
+                  `Dolosigranulum`, `Escherichia-Shigella`, `Fusobacterium`, `Gemella`, 
+                  `Granulicatella`, `Johnsonella`, `Klebsiella`, `Lachnoanaerobaculum`, 
+                  `Lachnospiraceae Family`, `Lactobacillus`, `Limosilactobacillus`, 
+                  `Ligilactobacillus`, `Mogibacterium`, `Neisseria`, `Pseudomonas`, 
+                  `Ralstonia`, `Veillonella`) %>%
+  rename_with(~ paste0("genus_", .), -c(PID, mal.type))
+for_plot <- gen_plot %>%
+  pivot_longer(
+    cols = -c(PID, mal.type),          # Select all columns except "Sample"
+    names_to = c("Rank", "Taxa"),  # Create two new columns: Rank and Taxa
+    names_sep = "_"          # Use the "_" separator to split names
+  ) %>%
+  mutate(Rank = factor(Rank, levels = c("phylum", "class", "order", "family", "genus"))) # order taxonomic ranks
+colors = c("SAM" = "#336633", "Stunting only" = "#CC6600")
+
+for_plot %>%
+  filter(!is.na(value))%>%
+  filter(value != 0) %>%
+  ggplot(aes(x = mal.type, y = value, fill = mal.type)) +
+  geom_boxplot(colour = "grey35") +
+  scale_fill_manual(values = colors) +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  facet_wrap(~Taxa, scales = "free_y", ncol = 6) +
+  labs(x = "", y = "Relative Abundance")
+ggsave("Output/Abund_lm_models/lm_sig_all_2025_genusOnly.png", plot = last_plot(), dpi = 600, device = "png", 
+       width = 18, height = 8, units = "in")
+```
+
+
+2. Clinical features - Relative abundance
+
+Genus level
+```{r}
+library(tidyverse)
+source("Code/Functions.R")
+ps0_st <- ps0_a %>%
+  ps_filter(mal.type == "Stunting")
+ps0_sam <- ps0_a %>%
+  ps_filter(mal.type == "SAM")
+#a) Stunting
+lm_age <- lm_mod_func(var = "AgeMonths_endo", data = ps0_st, rank = "Genus")
+lm_laz <- lm_mod_func(var = "LAZ_endo", data = ps0_st, rank = "Genus")
+lm_waz <- lm_mod_func(var = "WAZ_endo", data = ps0_st, rank = "Genus")
+lm_whz <- lm_mod_func(var = "WHZ_endo", data = ps0_st, rank = "Genus")
+lm_sex <- lm_mod_func(var = "Sex", data = ps0_st, rank = "Genus")
+lm_gast <- lm_mod_func(var =  "GastricPh_endo", data = ps0_st, rank = "Genus")
+lm_glp2 <- lm_mod_func(var =  "GLP.2_endo", data = ps0_st, rank = "Genus")
+lm_fabp <- lm_mod_func(var =  "I.FABP_new", data = ps0_st, rank = "Genus")
+lm_lps <- lm_mod_func(var = "LPS_endo", data = ps0_st, rank = "Genus")
+lm_scd14 <- lm_mod_func(var =  "sCD14_new", data = ps0_st, rank = "Genus")
+lm_vh <- lm_mod_func(var =  "VH", data = ps0_st, rank = "Genus")
+lm_cd <- lm_mod_func(var =  "CD", data = ps0_st, rank = "Genus")
+lm_esa <- lm_mod_func(var =  "ESA", data = ps0_st, rank = "Genus")
+
+df_list <- list(lm_age, lm_laz, lm_waz, lm_whz, lm_sex, lm_gast, lm_glp2, lm_fabp, lm_lps, lm_scd14, lm_vh ,lm_cd,lm_esa)
+lm_biomarkers <- Reduce(function(x,y) merge(x, y, all.x = TRUE, all.y = TRUE), df_list)
+write.csv(lm_biomarkers, "Output/Abund_lm_models/lm_clinical_feats_stunting_gen.csv")
+
+#b) SAM
+lm_age <- lm_mod_func(var = "AgeMonths_endo", data = ps0_sam, rank = "Genus")
+lm_laz <- lm_mod_func(var = "LAZ_endo", data = ps0_sam, rank = "Genus")
+lm_waz <- lm_mod_func(var = "WAZ_endo", data = ps0_sam, rank = "Genus")
+lm_whz <- lm_mod_func(var = "WHZ_endo", data = ps0_sam, rank = "Genus")
+lm_sex <- lm_mod_func(var = "Sex", data = ps0_sam, rank = "Genus")
+lm_gast <- lm_mod_func(var =  "GastricPh_endo", data = ps0_sam, rank = "Genus")
+lm_glp2 <- lm_mod_func(var =  "GLP.2_endo", data = ps0_sam, rank = "Genus")
+lm_fabp <- lm_mod_func(var =  "I.FABP_new", data = ps0_sam, rank = "Genus")
+lm_lps <- lm_mod_func(var = "LPS_endo", data = ps0_sam, rank = "Genus")
+lm_scd14 <- lm_mod_func(var =  "sCD14_new", data = ps0_sam, rank = "Genus")
+lm_vh <- lm_mod_func(var =  "VH", data = ps0_sam, rank = "Genus")
+lm_cd <- lm_mod_func(var =  "CD", data = ps0_sam, rank = "Genus")
+lm_esa <- lm_mod_func(var =  "ESA", data = ps0_sam, rank = "Genus")
+lm_hiv <- lm_mod_func(var =  "hiv_char", data = ps0_sam, rank = "Genus")
+
+df_list <- list(lm_age, lm_laz, lm_waz, lm_whz, lm_sex, lm_gast, lm_glp2, lm_fabp, lm_lps, lm_scd14, lm_vh ,lm_cd,lm_esa, lm_hiv)
+lm_biomarkers <- Reduce(function(x,y) merge(x, y, all.x = TRUE, all.y = TRUE), df_list) #nothing is significant
+write.csv(lm_biomarkers, "Output/Abund_lm_models/lm_clinical_feats_sam_gen.csv")
+rm(list = ls()[grep("^lm", ls())])
+```
+
+#DONE
+
