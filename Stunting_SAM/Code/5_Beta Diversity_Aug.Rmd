@@ -1,0 +1,79 @@
+---
+title: "Beta diversity Analysis (Part 1)"
+author: Monica N Mweetwa
+date: 01/07/2025
+---
+Set working directory
+```{r setup}
+   knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM")) 
+   #knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM")) 
+```
+
+load data
+```{r}
+library(phyloseq)
+library(vegan)
+library(ggpubr)
+library("ggplot2")
+library(tableone)
+library(tidyverse)
+library(microViz)
+library(pals) #for color palette
+source("Code/Functions.R")
+load("Data/RData/Zam_phyloseqObj_AbsASV_Notree.RData") #ps0_withtree
+```
+
+PERMANOVA
+```{r}
+#Combine at genus level
+ps0.gen <- tax_glom(ps0, taxrank = "Genus", NArm = TRUE)
+#Rename taxa with genus names
+genus.names <- make.names(tax_table(ps0.gen)[,'Genus'], unique = TRUE)
+taxa_names(ps0.gen) <- genus.names
+
+#Transform to relative composition
+ps0.gen_comp <- ps0 %>%
+  ps_mutate(mal.type = ifelse(study == "EE children", "SAM", "Stunting only")) %>%
+  tax_fix() %>%
+  tax_transform("compositional", rank = "Genus")
+  
+#Permanova analysis @ genus level
+dist = phyloseq::distance(ps0.gen_comp, method="bray")
+metadata <- data.frame(sample_data(ps0.gen_comp))
+
+adonis2(dist ~ mal.type + AgeMonths_endo, data = metadata, na.action = na.omit, method = "bray")
+#         Df SumOfSqs      R2      F Pr(>F)    
+#Model     2   0.7434 0.08344 3.3684  0.001 ***
+#Residual 74   8.1664 0.91656                  
+#Total    76   8.9098 1.00000                  
+#---
+#Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#test for homogeneity of dispersion via PERMDISP
+library(vegan)
+betadisp <- betadisper(dist, metadata$mal.type, type = c("centroid"), bias.adjust = FALSE, sqrt.dist = FALSE, add = FALSE)
+plot(betadisp)
+boxplot(betadisp$distances)
+anova(betadisp) #p < 0.0001
+permutest(betadisper(dist, metadata$mal.type)) # p = 0.001
+```
+
+Modified adonis2 function incorporating Andersons modification for in-balanced groups was implemented using the PRIMER7 package
+```{r}
+#export data from PRIMER7
+out_tab <- as.data.frame(ps0.gen@otu_table)
+sam_tab <- as.data.frame(ps0.gen@sam_data) %>% rownames_to_column(var = "code")
+write.csv(out_tab, "Data/PRIMER7/otu_tab.csv")
+write_csv(sam_tab, "Data/PRIMER7/sam_tab.csv")
+
+#relative abundance data
+out_tab <- as.data.frame(ps0.gen_comp@otu_table)
+sam_tab <- as.data.frame(ps0.gen_comp@sam_data) %>% rownames_to_column(var = "code")
+write.csv(out_tab, "Data/PRIMER7/otu_tab_rel.csv")
+write_csv(sam_tab, "Data/PRIMER7/sam_tab_rel.csv")
+
+```
+Analysis in PRIMER indicate that there is a significant difference in both the PERMANOVA and PERMDISP analysis
+
+
+

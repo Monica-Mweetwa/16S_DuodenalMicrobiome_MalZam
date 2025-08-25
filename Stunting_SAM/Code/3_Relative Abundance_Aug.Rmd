@@ -1,0 +1,393 @@
+---
+title: "Differential Abundance Analysis"
+author: Monica N Mweetwa
+date: 01/07/2025
+---
+Set working directory
+```{r setup}
+   #knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM")) 
+   knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM")) 
+```
+
+load data
+```{r}
+library(phyloseq)
+library(ggpubr)
+library("ggplot2")
+library(tableone)
+library(tidyverse)
+library(microViz)
+library(pals) #for color palette
+library(corrr)
+load("Data/RData/Zam_phyloseqObj_AbsASV_Withtree.RData") #ps0_withtree
+ps0_a <- ps0_withtree %>%
+  ps_mutate(mal.type = ifelse(study == "EE children", "SAM", "Stunting only"))
+ps0_st <- ps0_a %>%
+  ps_filter(mal.type == "Stunting only")
+ps0_sam <- ps0_a %>%
+  ps_filter(mal.type == "SAM")
+```
+
+#1. Visualization of relative abundance of top 15 genera in both datasets
+```{r}
+otu_palette <- c(unname(alphabet2(n=15)), "lightgray")
+
+#Genus level
+a <- ps0_a %>%
+  tax_fix() %>% 
+  comp_barplot(tax_level = "Genus",
+               label = "PID",
+               n_taxa = 15) +
+  coord_flip() +
+  facet_grid(
+    rows = vars(mal.type),
+    scales = "free_y", # this only frees y scale per row in grid faceting
+    space = "free_y" # allows bars to be same size by freeing facet heights
+  ) +
+  theme(axis.text.y = (element_blank()),
+        axis.ticks.y = (element_blank()))
+
+ggsave("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/RelAbund_gen2.png", plot = a, dpi = 600, device = "png", width = 8, height = 8, units = "in")
+
+#get relative abundance (%) and prevalence
+ps0_gen <- ps0_a %>%
+  tax_fix() %>%
+  tax_transform("compositional", rank = "Genus") %>%
+  ps_melt() %>%
+  group_by(mal.type, OTU) %>%
+  summarize(N = n(),
+            prevalence = round((sum(Abundance > 0) / dplyr::n())*100,5),
+            mean_val = round((mean(Abundance, na.rm = T))*100,5),
+            SD_val = round((sd(Abundance, na.rm = T))*100,5)) %>%
+  pivot_wider(names_from = mal.type, values_from = c(N, prevalence, mean_val, SD_val))
+write_csv(ps0_gen, "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Gen_abund2.csv")
+```
+
+Differential Abundance of microbes
+
+1. Stunting vs SAM (adjusted for age and sex)
+```{r}
+library(ANCOMBC)
+set.seed(123)
+
+output = ancombc2(data = ps0_a, tax_level = "Genus",
+                  fix_formula = "mal.type + AgeMonths_endo + Sex", rand_formula = NULL,
+                  p_adj_method = "BY", pseudo_sens = TRUE,
+                  prv_cut = 0.1, lib_cut = 0, s0_perc = 0.05,
+                  group = "mal.type", struc_zero = TRUE, neg_lb = TRUE)
+res_prim = output$res
+res_prim.maltype <- res_prim %>% select(taxon, contains("mal.type"))
+write_csv(res_prim.maltype, "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/lm_mal.type_ancombc2_gen_Jul_mult2.csv")
+res_prim_str0 = output$zero_ind
+write_csv(res_prim_str0, "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/lm_mal.type_ancombc2_srt0_gen_Jul_mult2.csv")
+```
+
+Plot significant genus associations
+```{r}
+#get significant taxon names
+colors = c("SAM" = "#336633", "Stunting only" = "#CC6600")
+sig_taxa <- res_prim %>% filter(`diff_mal.typeStunting only`) %>% 
+  filter(`passed_ss_mal.typeStunting only`) %>% 
+  select(taxon, contains("mal.typeStunting")) #%>%
+  #separate(taxon, into = c("Rank", "Taxon"), sep = ":")
+  
+
+for_plot <- ps0_a %>%
+  tax_fix() %>%
+  tax_transform("identity", rank = "Genus") %>%
+  ps_melt() 
+for_plot %>% 
+  filter(OTU %in% sig_taxa$taxon) %>%
+  select(PID, mal.type, OTU, Abundance) %>%
+  filter(!is.na(Abundance))%>%
+  #filter(Abundance != 0) %>%
+  ggplot(aes(x = mal.type, y = Abundance, fill = mal.type)) +
+  geom_boxplot(colour = "grey35") +
+  scale_fill_manual(values = colors) +
+  geom_jitter(width = 0.2, alpha = 0.5) +
+  theme_bw() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  facet_wrap(~OTU, scales = "free_y", ncol = 5) +
+  labs(x = "", y = "Absolute Abundance")
+ggsave("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/lm_sig_all_genus_abs2.png", plot = last_plot(), dpi = 600, device = "png",width = 18, height = 6, units = "in")
+```
+
+
+2. Models with clinical features
+
+ANCOM-BC2 function
+```{r}
+library(ANCOMBC)
+set.seed(123)
+#categorical variable
+ancombc_func_cat <- function(dat, vars, grp, output_dir){
+  output = ancombc2(data = dat, tax_level = "Genus",
+                  fix_formula = vars, rand_formula = NULL,
+                  p_adj_method = "BY", pseudo_sens = TRUE,
+                  prv_cut = 0.1, lib_cut = 0, s0_perc = 0.05,
+                  group = grp, struc_zero = F)
+  res_prim = output$res
+  res_prim2 <- res_prim %>% select(taxon, contains(grp))
+  write.csv(res_prim2, output_dir)
+  }
+#continuous variable
+ancombc_func_cont <- function(dat, vars, main1, output_dir){
+  output = ancombc2(data = dat, tax_level = "Genus",
+                  fix_formula = vars, rand_formula = NULL,
+                  p_adj_method = "BY", pseudo_sens = TRUE,
+                  prv_cut = 0.1, lib_cut = 0, s0_perc = 0.05,
+                  group = NULL, struc_zero = F)
+  res_prim = output$res
+  res_prim2 <- res_prim %>% select(taxon, contains(main1))
+  write.csv(res_prim2, output_dir)
+}
+```
+
+Genus level models
+#a) Stunting
+```{r}
+
+#check correlation between dependent variables
+add3 <- ps0_st %>%
+  samdat_tbl() %>%
+  mutate(Sex_num = ifelse(Sex == "Male", 1, 2),) %>%
+  select(AgeMonths_endo, Sex_num, HIV_status, BFeeding)
+var_add4 <- cor(add3, use = "na.or.complete") # independent variables correlation matrix 
+
+corrplot::corrplot(var_add4 ,method='number', is.corr = T,type="upper", 
+         title='Predictors Correlation Matrix for stunted children - BEECH (Zambian dataset)',
+         mar=c(0,0,1,0)) # inspect for collinearity
+
+#there are weak correlations with each other so add all as covariables
+
+##univar
+ancombc_func_cat(vars = "Sex", dat = ps0_st, grp = "Sex", 
+                 output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_sex_univar.csv")
+ancombc_func_cat(vars = "BFeeding_char",  grp = "BFeeding_char", dat = ps0_st, 
+                 output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_bf_univar.csv")
+ancombc_func_cont(vars = "AgeMonths_endo", dat = ps0_st, main1 = "AgeMonths_endo", 
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_age_univar.csv")
+ancombc_func_cont(vars = "LAZ_endo", main1 = "LAZ_endo", dat = ps0_st, 
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_laz_univar.csv")
+ancombc_func_cont(vars = "WAZ_endo", main1 = "WAZ_endo", dat = ps0_st,  
+                  output_dir ="~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_waz_univar.csv")
+ancombc_func_cont(vars = "WHZ_endo", main1 = "WHZ_endo", dat = ps0_st,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_wlz_univar.csv")
+ancombc_func_cont(vars =  "GastricPh_endo", main1 = "GastricPh_endo", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_gast_univar.csv")
+ancombc_func_cont(vars =  "GLP.2_endo", main1 = "GLP.2_endo", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_glp2_univar.csv")
+ancombc_func_cont(vars =  "I.FABP_new", main1 = "I.FABP_new", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_ifabp_univar.csv")
+ancombc_func_cont(vars = "LPS_endo", main1 = "LPS_endo", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_lps_univar.csv")
+ancombc_func_cont(vars =  "sCD14_new", main1 = "sCD14_new", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_scd14_univar.csv") 
+ancombc_func_cont(vars =  "VH", main1 = "VH", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_vh_univar.csv") 
+ancombc_func_cont(vars =  "CD", main1 = "CD", dat = ps0_st, 
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_cd_univar.csv") 
+ancombc_func_cont(vars =  "ESA", main1 = "ESA", dat = ps0_st,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_esa_univar.csv")
+
+
+###Multivar
+ancombc_func_cont(vars = "LAZ_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "LAZ_endo", dat = ps0_st, 
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_laz_multivar.csv")
+ancombc_func_cont(vars = "WAZ_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "WAZ_endo", dat = ps0_st,  
+                  output_dir ="~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_waz_multivar.csv")
+ancombc_func_cont(vars = "WHZ_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "WHZ_endo", dat = ps0_st,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_wlz_multivar.csv")
+ancombc_func_cont(vars =  "GastricPh_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "GastricPh_endo", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_gast_multivar.csv")
+ancombc_func_cont(vars =  "GLP.2_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "GLP.2_endo", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_glp2_multivar.csv")
+ancombc_func_cont(vars =  "I.FABP_new + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "I.FABP_new", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_ifabp_multivar.csv")
+ancombc_func_cont(vars = "LPS_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "LPS_endo", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_lps_multivar.csv")
+ancombc_func_cont(vars =  "sCD14_new + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "sCD14_new", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_scd14_multivar.csv") 
+ancombc_func_cont(vars =  "VH + AgeMonths_endo + Sex + BFeeding_char", main1 = "VH", dat = ps0_st,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_vh_multivar.csv") 
+ancombc_func_cont(vars =  "CD + AgeMonths_endo + Sex + BFeeding_char", main1 = "CD", dat = ps0_st, 
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_cd_multivar.csv") 
+ancombc_func_cont(vars =  "ESA + AgeMonths_endo + Sex + BFeeding_char", main1 = "ESA", dat = ps0_st,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/Stunting2/lm_esa_multivar.csv")
+
+```
+
+#b) SAM
+```{r}
+#check correlation between dependent variables
+add3 <- ps0_sam %>%
+  samdat_tbl() %>%
+  mutate(Sex_num = ifelse(Sex == "Male", 1, 2),) %>%
+  select(AgeMonths_endo, Sex_num, HIV_status, BFeeding, )
+
+var_add4 <- cor(add3, use = "na.or.complete") # independent variables correlation matrix 
+
+corrplot::corrplot(var_add4 ,method='number', is.corr = T,type="upper", 
+         title='Predictors Correlation Matrix for children with SAM - ME (Zambian dataset)',
+         mar=c(0,0,1,0)) # inspect for collinearity
+#there are weak correaltion so add all covariables
+
+ancombc_func_cat(vars = "Sex", grp = "Sex", dat = ps0_sam,  
+                 output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_sex_univar.csv")
+ancombc_func_cat(vars = "BFeeding_char",  grp = "BFeeding_char", dat = ps0_sam,  
+                 output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_bf_univar.csv")
+ancombc_func_cat(vars = "Odema + AgeMonths_endo + Sex + BFeeding_char + hiv_char", grp = "Odema", dat = ps0_sam,  
+                 output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_odema.csv")
+ancombc_func_cont(vars = "AgeMonths_endo", main1 = "AgeMonths_endo", dat = ps0_sam,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_age_univar.csv")
+ancombc_func_cont(vars = "LAZ_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "LAZ_endo", dat = ps0_sam,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_laz.csv")
+ancombc_func_cont(vars = "WAZ_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "WAZ_endo", dat = ps0_sam,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_waz.csv")
+ancombc_func_cont(vars = "WHZ_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "WHZ_endo", dat = ps0_sam,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_wlz.csv")
+ancombc_func_cont(vars =  "MUAC + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "MUAC", dat = ps0_sam,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_muac.csv")
+ancombc_func_cont(vars =  "GastricPh_endo + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "GastricPh_endo", dat = ps0_sam,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_gas.csv")
+ancombc_func_cont(vars =  "GLP.2_endo + AgeMonths_endo + Sex + hiv_char", main1 = "GLP.2_endo", dat = ps0_sam,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_glp2.csv")
+ancombc_func_cont(vars =  "I.FABP_new + AgeMonths_endo + Sex + hiv_char", main1 = "I.FABP_new", dat = ps0_sam,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_fabp.csv")
+ancombc_func_cont(vars = "LPS_endo + AgeMonths_endo + Sex + hiv_char", main1 = "LPS_endo", dat = ps0_sam,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_lps.csv")
+ancombc_func_cont(vars =  "sCD14_new + AgeMonths_endo + Sex + hiv_char", main1 = "sCD14_new", dat = ps0_sam,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_scd14.csv")
+ancombc_func_cont(vars =  "VH + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "VH", dat = ps0_sam,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_vh.csv")
+ancombc_func_cont(vars =  "CD + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "CD", dat = ps0_sam,  
+                  output_dir = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_cd.csv")
+ancombc_func_cont(vars =  "ESA + AgeMonths_endo + Sex + BFeeding_char + hiv_char", main1 = "ESA", dat = ps0_sam,  
+                  output_dir =  "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/RelAbund/Abund_lm_models/SAM2/lm_esa.csv")
+
+rm(list = ls()[grep("^lm", ls())])
+
+```
+
+Plot signficant associations -- Helicobacter does not pass sensitivity analysis in new analysis!
+```{r}
+#### Stunting
+#Sex - Bifidobacterium
+#WLZ - Limosilactobacillus, Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium
+#sCD14 - Lachnoanaerobaculum
+#lps - Escherichia-Shigella
+
+dat <- ps0_st %>%
+  tax_fix() %>%
+  tax_transform("identity", rank = "Genus") %>%
+  ps_melt() 
+dat %>%
+  filter(OTU == "Escherichia-Shigella") %>%
+  ggplot(aes(x = LPS_endo, y = log(Abundance))) + 
+  geom_point() +
+  #scale_y_log10() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+dat %>%
+  #filter(Abundance > 0) %>%
+  #filter(sCD14_new < 4) %>%
+  filter(OTU == "Lachnoanaerobaculum") %>%
+  ggplot(aes(x = sCD14_new, y = log(Abundance))) + 
+  geom_point() +
+  #scale_y_log10() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+dat %>%
+  filter(Abundance > 0) %>%
+  filter(OTU == "Limosilactobacillus") %>%
+  ggplot(aes(x = WHZ_endo, y = log(Abundance))) + 
+  geom_point() +
+  #scale_y_log10() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+dat %>%
+  #filter(Abundance > 0) %>%
+  filter(OTU == "Allorhizobium-Neorhizobium-Pararhizobium-Rhizobium") %>%
+  ggplot(aes(x = WHZ_endo, y = log(Abundance))) + 
+  geom_point() +
+  #scale_y_log10() +
+  geom_smooth(method = "lm") +
+  theme_bw()
+dat %>%
+  #filter(Abundance > 0) %>%
+  filter(OTU == "Bifidobacterium") %>%
+  ggplot(aes(x = Sex, y = log(Abundance))) + 
+  geom_boxplot() +
+  #scale_y_log10() +
+  theme_bw()
+
+####None of the associations are strong associations and could be driven by outliers
+```
+#DONE
+
+Do not run code below!!!!!!!!!!!!!
+
+Using pearson correlations for stunted children
+```{r}
+pearson_corr_grouped <- function(var){
+  grouped_dat<- dat_for_cor %>%
+    group_by(OTU) %>%
+    group_split() #creates list of dataframes
+  results <- lapply(grouped_dat, function(g_dat) {
+    cor_1 <- psych::corr.test(g_dat %>% select(var, LAZ_endo, WHZ_endo, WAZ_endo),
+                       method = "pearson", adjust = "fdr")
+    cr1 <- cor_1$ci %>%
+      rownames_to_column(var = "rel")
+    corr_dat <- cor_1$ci2 %>% mutate(var_name = var)
+    corr_dat$var_name <- cr1$rel
+    corr_dat$group <- unique(g_dat$OTU)
+    return(corr_dat)
+  })
+  combined_results <- bind_rows(results)
+  print(combined_results)
+}
+#Convert abundance to log10 values
+dat_for_cor <- ps0_st %>%
+  tax_fix() %>% 
+  tax_transform("identity", rank = "Genus") %>%
+  ps_melt() %>%
+  mutate(Abundance_log10 = log10(Abundance)) #Convert scaled absolute ASV abundance to log10 scale
+
+cor_1 <- pearson_corr_grouped(var = "Abundance_log10")
+library(data.table)
+corr_abund <- cor_1 %>%
+  filter(var_name %like% "Ab_10") #%>%
+  filter(p <= 0.05) %>%
+  filter(p.adj < 0.1) %>% filter(group == "Abiotrophia defectiva" |
+                                 group == "Actinomyces" |
+                                 group == "Actinomyces odontolyticus" |
+                                 group == "Dolosigranulum pigrum" |
+                                 group == "Gemella" |
+                                 group == "Granulicatella" |
+                                 group == "Granulicatella elegans" |
+                                 group == "Haemophilus" |
+                                 group == "Johnsonella" |
+                                 group == "Leptotrichia" |
+                                 group == "Neisseria" |
+                                 group == "Pseudomonas" |
+                                 group == "Streptococcus" |
+                                 group == "Veillonella")
+write.csv(corr_abund, "Output/BEEDSEEM_FullDataset/PearsonCorr_fdr_BEED.csv")
+
+prop_prev_data <- ps0_st %>%
+  ps_mutate(mal.type = ifelse(study == "EE children", "SAM", "Stunting only")) %>%
+  tax_fix() %>%
+  tax_transform("compositional", rank = "ASVTaxa") %>%
+  ps_melt() %>%
+  group_by(OTU, mal.type) %>%
+  summarise(avg_abundance = mean(Abundance),
+            prevalence = sum(Abundance > 0) / dplyr::n()) %>%
+  filter(prevalence > 0.8) %>%
+  pivot_wider(names_from = mal.type, values_from = c(avg_abundance, prevalence)) 
+#Gemella, Leptotrichia, Johnsonella and Actinomyces odontolyticus were positively associated with WAZ and WHZ but not LAZ 
+```
+
+
+#DONE
+

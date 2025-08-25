@@ -1,0 +1,335 @@
+---
+title: "Alpha diversity Analysis (Part 1)"
+author: Monica N Mweetwa
+date: 30/12/2024
+---
+Set working directory
+```{r setup}
+   knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM")) 
+   #knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM")) 
+```
+
+load data
+```{r}
+library(phyloseq)
+library(ggpubr)
+library("ggplot2")
+library(tableone)
+library(tidyverse)
+library(microViz)
+library(pals) #for color palette
+library(car) #for ncvTest function
+library(DHARMa) #for assessing residual of linear models
+load("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Data/RData/Zam_phyloseqObj_AbsASV_Withtree.RData") #ps3_withtree
+```
+
+Alpha diversity
+```{r}
+#Calculate Shannon
+ad = estimate_richness(ps0_withtree, measures = "Shannon")
+ad <- rownames_to_column(ad, "sampleID")
+
+#Calculate Faith's PD estimate
+library(btools)
+pd <- estimate_pd(ps0_withtree)
+pd <- rownames_to_column(pd, "sampleID")
+
+#Combine measures
+AlphaDiv = merge(pd, ad, by = "sampleID")
+
+add <- data.frame(sample_data(ps0_withtree))
+add <- rownames_to_column(add, "SampleID2")
+
+add2 = merge(add, AlphaDiv, by = "sampleID")
+write_csv(add2 , "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/AlphaDiv/AlphDiv_values.csv")
+```
+
+Relationship between alpha diversity (Faith's PD) - Clinical features.
+
+a. generalized linear regressions
+
+Univariate function
+```{r}
+#function to get linear regression model outputs
+lm_func = function(equation,data){
+  # Fit the linear model and calculate standardized beta coefficients
+  lm_mod = lm(formula = equation, data = data)
+  # Extract coefficients and confidence intervals
+  mod <- summary(lm_mod)
+  coef = as.data.frame(mod[["coefficients"]])
+  coef <- coef %>%
+    mutate(lwr=Estimate-1.96*`Std. Error`,
+           upr=Estimate+1.96*`Std. Error`,
+           `95% CI` = paste0("(",format(lwr,scientific = T),", ",format(upr,scientific = T),")"),
+           Number_of_observations = paste0(nobs(lm_mod))) %>%
+    rownames_to_column(var = "Term") %>%
+    filter(Term != "(Intercept)")
+  print(coef)
+}
+```
+
+All samples combined
+```{r}
+#Faith's PD
+mod1 <- lm_func("PD~study", dat = add2)
+mod2 <- lm_func("PD~AgeMonths_endo", dat = add2)
+mod3 <- lm_func("PD~Sex", dat = add2)
+mod4 <- lm_func("PD~hiv_char", dat = add2)
+mod5 <- lm_func("PD~BFeeding_char", dat = add2)
+mod6 <- lm_func("PD~WAZ_endo", dat = add2)
+mod7 <- lm_func("PD~LAZ_endo", dat = add2)
+mod8 <- lm_func("PD~GastricPh_endo", dat = add2)
+mod9 <- lm_func("PD~GLP.2_endo", dat = add2)
+mod10 <- lm_func("PD~I.FABP_new", dat = add2)
+mod11 <- lm_func("PD~LPS_endo", dat = add2)
+mod12 <- lm_func("PD~sCD14_new", dat = add2)
+mod13 <- lm_func("PD~VH", dat = add2)
+mod14 <- lm_func("PD~CD", dat = add2)
+mod15 <- lm_func("PD~ESA", dat = add2)
+mod16 <- lm_func("PD~MUAC", dat = add2)
+mod17 <- lm_func("PD~Odema", dat = add2)
+df_list <- list(mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12, mod13, mod14, mod15, mod16, mod17)
+glm_all_PD <- Reduce(function(x,y) merge(x, y, all.x = TRUE, all.y = TRUE), df_list)
+write.csv(glm_all_PD, "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/AlphaDiv/LinearRegression/PD/glm_mod_PD_All_jul.csv")
+rm(list = ls()[grep("^mod", ls())])
+
+#Shannons index
+mod1 <- lm_func("Shannon~study", dat = add2)
+mod2 <- lm_func("Shannon~AgeMonths_endo", dat = add2)
+mod3 <- lm_func("Shannon~Sex", dat = add2)
+mod4 <- lm_func("Shannon~hiv_char", dat = add2)
+mod5 <- lm_func("Shannon~BFeeding_char", dat = add2)
+mod6 <- lm_func("Shannon~WAZ_endo", dat = add2)
+mod7 <- lm_func("Shannon~LAZ_endo", dat = add2)
+mod8 <- lm_func("Shannon~GastricPh_endo", dat = add2)
+mod9 <- lm_func("Shannon~GLP.2_endo", dat = add2)
+mod10 <- lm_func("Shannon~I.FABP_new", dat = add2)
+mod11 <- lm_func("Shannon~LPS_endo", dat = add2)
+mod12 <- lm_func("Shannon~sCD14_new", dat = add2)
+mod13 <- lm_func("Shannon~VH", dat = add2)
+mod14 <- lm_func("Shannon~CD", dat = add2)
+mod15 <- lm_func("Shannon~ESA", dat = add2)
+mod16 <- lm_func("Shannon~MUAC", dat = add2)
+mod17 <- lm_func("Shannon~Odema", dat = add2)
+df_list <- list(mod1, mod2, mod3, mod4, mod5, mod6, mod7, mod8, mod9, mod10, mod11, mod12, mod13, mod14, mod15, mod16, mod17)
+glm_all_shannon <- Reduce(function(x,y) merge(x, y, all.x = TRUE, all.y = TRUE), df_list)
+write.csv(glm_all_shannon, "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/AlphaDiv/LinearRegression/glm_mod_shannon_All_Jul.csv")
+rm(list = ls()[grep("^mod", ls())])
+```
+
+Residual Diagnostics for Hierarchical Model
+```{r}
+library(export)
+
+model_dignos_func <- function(equation, label){
+  simulationOutput  <- simulateResiduals(glm(equation, data = add2))
+  graph2ppt(plot(simulationOutput, title = label),
+          width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+  a <- as.data.frame(car::vif(lm(equation, dat = add3)))
+  barplot(a$GVIF, main = paste0(label," - VIF Values"),horiz = FALSE,  col = "steelblue", ylim = c(0, 2)) 
+  graph2ppt(plot(simulationOutput, title = label),
+          width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+}
+
+model_dignos_func(equation = "PD~study", label = "PD~study")
+model_dignos_func(equation = "PD~AgeMonths_endo", label = "PD~Age")
+model_dignos_func(equation = "PD~Sex", label = "PD~Sex")
+model_dignos_func(equation = "PD~hiv_char", label = "PD~HIV_status")
+model_dignos_func(equation = "PD~BFeeding_char", label = "PD~Breastfeeding")
+model_dignos_func(equation = "PD~WAZ_endo", label = "PD~WAZ")
+model_dignos_func(equation = "PD~LAZ_endo", label = "PD~LAZ")
+model_dignos_func(equation = "PD~GastricPh_endo", label = "PD~GastricpH")
+model_dignos_func(equation = "PD~GLP.2_endo", label = "PD~GLP2")
+model_dignos_func(equation = "PD~I.FABP_new", label = "PD~iFABP")
+model_dignos_func(equation = "PD~LPS_endo", label = "PD~LPS")
+model_dignos_func(equation = "PD~sCD14_new", label = "PD~sCD14")
+model_dignos_func(equation = "PD~VH", label = "PD~VH")
+model_dignos_func(equation = "PD~CD", label = "PD~CD")
+model_dignos_func(equation = "PD~ESA", label = "PD~ESA")
+model_dignos_func(equation = "PD~MUAC", label = "PD~MUAC")
+model_dignos_func(equation = "PD~Odema", label = "PD~Oedema")
+model_dignos_func(equation = "PD~study", label = "PD~study")
+model_dignos_func(equation = "PD~AgeMonths_endo", label = "PD~Age")
+model_dignos_func(equation = "PD~Sex", label = "PD~Sex")
+model_dignos_func(equation = "PD~hiv_char", label = "PD~HIV_status")
+model_dignos_func(equation = "PD~BFeeding_char", label = "PD~Breastfeeding")
+model_dignos_func(equation = "PD~WAZ_endo", label = "PD~WAZ")
+model_dignos_func(equation = "PD~LAZ_endo", label = "PD~LAZ")
+model_dignos_func(equation = "PD~GastricPh_endo", label = "PD~GastricpH")
+model_dignos_func(equation = "PD~GLP.2_endo", label = "PD~GLP2")
+model_dignos_func(equation = "PD~I.FABP_new", label = "PD~iFABP")
+model_dignos_func(equation = "PD~LPS_endo", label = "PD~LPS")
+model_dignos_func(equation = "PD~sCD14_new", label = "PD~sCD14")
+model_dignos_func(equation = "PD~VH", label = "PD~VH")
+model_dignos_func(equation = "PD~CD", label = "PD~CD")
+model_dignos_func(equation = "PD~ESA", label = "PD~ESA")
+model_dignos_func(equation = "PD~MUAC", label = "PD~MUAC")
+model_dignos_func(equation = "PD~Odema", label = "PD~Oedema")
+
+model_dignos_func(equation = "Shannon~study", label = "Shannon~study")
+model_dignos_func(equation = "Shannon~AgeMonths_endo", label = "Shannon~Age")
+model_dignos_func(equation = "Shannon~Sex", label = "Shannon~Sex")
+model_dignos_func(equation = "Shannon~hiv_char", label = "Shannon~HIV_status")
+model_dignos_func(equation = "Shannon~BFeeding_char", label = "Shannon~Breastfeeding")
+model_dignos_func(equation = "Shannon~WAZ_endo", label = "Shannon~WAZ")
+model_dignos_func(equation = "Shannon~LAZ_endo", label = "Shannon~LAZ")
+model_dignos_func(equation = "Shannon~GastricPh_endo", label = "Shannon~GastricpH")
+model_dignos_func(equation = "Shannon~GLP.2_endo", label = "Shannon~GLP2")
+model_dignos_func(equation = "Shannon~I.FABP_new", label = "Shannon~iFABP")
+model_dignos_func(equation = "Shannon~LPS_endo", label = "Shannon~LPS")
+model_dignos_func(equation = "Shannon~sCD14_new", label = "Shannon~sCD14")
+model_dignos_func(equation = "Shannon~VH", label = "Shannon~VH")
+model_dignos_func(equation = "Shannon~CD", label = "Shannon~CD")
+model_dignos_func(equation = "Shannon~ESA", label = "Shannon~ESA")
+model_dignos_func(equation = "Shannon~MUAC", label = "Shannon~MUAC")
+model_dignos_func(equation = "Shannon~Odema", label = "Shannon~Oedema")
+```
+
+Multivariate regression for significant associations
+Correlation matrix between covariables
+```{r}
+#study, Age, HIV status, Breastfeeding status, Sex
+library(corrplot) ##for plotting the correlation
+
+add3 <- add2 %>%
+  mutate(Sex_num = ifelse(Sex == "Male", 1, 2),
+         study_num = ifelse(study == "BEECH children", 1, 2)) %>%
+  select(study_num, AgeMonths_endo, Sex_num, HIV_status, BFeeding)
+var_add4 <- cor(add3, use = "na.or.complete") # independent variables correlation matrix 
+
+corrplot(var_add4 ,method='number', is.corr = T,type="upper", 
+         title='Zambian Dataset Combined Predictors Correlation Matrix',
+         mar=c(0,0,1,0)) # inspect for collinearity
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+```
+
+Multivariate models: include study + Sex + AgeMonths_endo
+```{r}
+#Shannons index : study, WAZ, sCD14, 
+model_dignos_func(equation = "Shannon~ study + Sex + AgeMonths_endo", label = "glm(Shannon~study + Sex + Age)")
+model_dignos_func(equation = "Shannon~ WAZ_endo + study + Sex + AgeMonths_endo", label = "glm(Shannon~WAZ + study + Sex + Age)")
+model_dignos_func(equation = "Shannon~ sCD14_new + study + Sex + AgeMonths_endo", label = "glm(Shannon~sCD14 + study + Sex + Age)")
+model_dignos_func(equation = "PD~ study + Sex + AgeMonths_endo", label = "glm(PD~study + Sex + Age)")
+model_dignos_func(equation = "PD~ AgeMonths_endo + study + Sex", label = "glm(PD~Age + study + Sex + Age)")
+model_dignos_func(equation = "PD~ WAZ_endo + study + Sex + AgeMonths_endo", label = "glm(PD~WAZ + study + Sex + Age)")
+model_dignos_func(equation = "PD~ sCD14_new + study + Sex + AgeMonths_endo", label = "glm(PD~sCD14 + study + Sex + Age)")
+
+summary(glm("Shannon~ study + Sex + AgeMonths_endo", dat = add2)) #still significant
+summary(glm("Shannon~ WAZ_endo + study + Sex + AgeMonths_endo", dat = add2)) #not significant
+summary(glm("Shannon~ sCD14_new + study + Sex + AgeMonths_endo", dat = add2)) #still significant
+
+#faith's PD : study, WAZ, sCD14, Age
+summary(glm("PD~ study + Sex + AgeMonths_endo", dat = add2)) #still significant
+summary(glm("PD~ WAZ_endo + study + Sex + AgeMonths_endo", dat = add2)) #not significant
+summary(glm("PD~ sCD14_new + study + Sex + AgeMonths_endo", dat = add2)) #still significant
+summary(glm("PD~ AgeMonths_endo + study + Sex", dat = add2)) #borderline significance
+
+```
+
+Multivariate models: include study + AgeMonths_endo
+```{r}
+model_dignos_func(equation = "Shannon~ study + AgeMonths_endo", label = "glm(Shannon~study + Age)")
+model_dignos_func(equation = "Shannon~ WAZ_endo + study + AgeMonths_endo", label = "glm(Shannon~WAZ + study + Age)")
+model_dignos_func(equation = "Shannon~ sCD14_new + study + AgeMonths_endo", label = "glm(Shannon~sCD14 + study + Age)")
+model_dignos_func(equation = "PD~ study + AgeMonths_endo", label = "glm(PD~study + Age)")
+model_dignos_func(equation = "PD~ AgeMonths_endo + study + Sex", label = "glm(PD~Age + study + Age)")
+model_dignos_func(equation = "PD~ WAZ_endo + study + AgeMonths_endo", label = "glm(PD~WAZ + study + Age)")
+model_dignos_func(equation = "PD~ sCD14_new + study + AgeMonths_endo", label = "glm(PD~sCD14 + study + Age)")
+
+summary(glm("Shannon~ study + AgeMonths_endo", dat = add2)) #still significant
+summary(glm("Shannon~ WAZ_endo + study + AgeMonths_endo", dat = add2)) #not significant
+summary(glm("Shannon~ sCD14_new + study + AgeMonths_endo", dat = add2)) #still significant
+
+#faith's PD : study, WAZ, sCD14, Age
+summary(glm("PD~ study + AgeMonths_endo", dat = add2)) #still significant
+summary(glm("PD~ WAZ_endo + study + AgeMonths_endo", dat = add2)) #not significant
+summary(glm("PD~ sCD14_new + study + AgeMonths_endo", dat = add2)) #still significant
+summary(glm("PD~ AgeMonths_endo + study", dat = add2)) #borderline significance
+
+```
+
+Check for collinearity using variance inflation factors for multivariate models
+```{r}
+barplot(car::vif(glm("Shannon~ study + Sex + AgeMonths_endo", dat = add2)),
+        main = "glm(Shannon~ study + Sex + Age) - VIF Values",horiz = FALSE,  col = "steelblue", ylim = c(0, 2)) 
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+barplot(car::vif(glm("Shannon~ WAZ_endo + study + Sex + AgeMonths_endo", data = add2)),
+        main = "glm(Shannon~ WAZ + study + Sex + Age) - VIF Values",horiz = FALSE,  col = "steelblue", ylim = c(0, 2)) 
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+barplot(car::vif(glm("Shannon~ sCD14_new + study + Sex + AgeMonths_endo", data = add2)),
+        main = "glm(Shannon~ sCD14 + study + Sex + Age) - VIF Values", horiz = FALSE,  col = "steelblue",  ylim = c(0, 2)) 
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+barplot(car::vif(glm("PD~ study + Sex + AgeMonths_endo", data = add2)),
+        main = "glm(PD~study + Sex + Age) - study VIF Values", horiz = FALSE, col = "steelblue", ylim = c(0, 2)) 
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+barplot(car::vif(glm("PD~ WAZ_endo + study + Sex + AgeMonths_endo", data = add2)),
+        main = "glm(PD~ WAZ + study + Sex + Age) - WAZ VIF Values", horiz = FALSE,  col = "steelblue",  ylim = c(0, 2)) 
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+barplot(car::vif(glm("PD~ sCD14_new + study + Sex + AgeMonths_endo", data = add2)),
+        main = "glm(PD~ sCD14 + study + Sex + Age) - VIF Values",horiz = FALSE,col = "steelblue", ylim = c(0, 2)) 
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+barplot(car::vif(glm("PD~ AgeMonths_endo + study + Sex", data = add2)),
+        main = "glm(PD~ Age + study + Sex) - VIF Values", horiz = FALSE, col = "steelblue", ylim = c(0, 2)) 
+graph2ppt(width = 10,height = 4.9,center=FALSE,aspectr=16/9,
+          offy=(10 *9/16)- 4.9,offx=0,vector.graphic = F,
+          file="Output/AlphaDiv/RegressionModel_Diagnostics.pptx",   margins=0, upscale=TRUE,append = TRUE)
+```
+
+Plot regression associations - sCD14 and study
+```{r}
+colors = c("SAM" = "#336633", "Stunting only" = "#CC6600")
+
+#sCD14
+a <- add2 %>%
+  mutate(mal.type = ifelse(study == "EE children", "SAM", "Stunting only")) %>%
+  pivot_longer(names_to = "clin_vars", values_to = "vals", cols = c(PD, Shannon)) %>%
+  filter(!is.na(vals)) %>%
+  filter(vals != 0) %>%
+  ggplot(aes(x = sCD14_new, y = vals)) +
+  geom_point(aes(color = mal.type)) + theme_bw() +
+  scale_color_manual(values = colors) +
+  geom_smooth(method = "lm") +
+  labs(x = "sCD14 conc.",
+       y = "Alpha Diversity metrics",
+       color = "Malnutrition group",
+       subtitle = "Shannon: β = -0.17801 , p = 0.0332\nFaith's PD: β = -0.79782 , p = 0.01833") +
+  facet_grid(vars(clin_vars), scales="free_y")
+
+#malnutrition type
+b <- add2 %>%
+  mutate(mal.type = ifelse(study == "EE children", "SAM", "Stunting only")) %>%
+  pivot_longer(names_to = "clin_vars", values_to = "vals", cols = c(PD, Shannon)) %>%
+  filter(!is.na(vals)) %>%
+  filter(vals != 0) %>%
+  ggplot(aes(x = mal.type, y = vals)) +
+  geom_boxplot(aes(fill = mal.type)) + theme_bw() +
+  scale_fill_manual(values = colors) +
+  labs(x = "Malnutrition group",
+       y = "Alpha Diversity metrics",
+       fill = "Malnutrition group",
+       subtitle = "Shannon: β = -0.518 , p = 0.0013\nFaith's PD: β = -3.63651 , p = 1.72E-07") +
+  facet_grid(vars(clin_vars), scales="free_y")
+
+ggpubr::ggarrange(a,b, nrow = 1, common.legend = T, legend = "right", labels = c("(a)", "(b)"))
+
+ggsave("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Stunting_SAM/Output/AlphaDiv/AlphaDiv_sig_univar.png", plot = last_plot(), dpi = 600, device = "png", width = 10, height = 4, units = "in")
+```
+
