@@ -20,9 +20,9 @@ This repository holds the code for 2 analyses:
    Project ID - PRJEB27868	(single-ended amplicons sequenced by Microbiome insights)
 
 ## SAM vs Stunting Analysis
-62% of children with SAM were stunted but stunted children were not severely malnourished i.e severe wasting (WLZ < -3). The ASV counts and taxonomic identification from fastQ files was done by the WashU team. The code deposited here, details the analysis done to relate this data to metdata (clincal features for these children). A guidance document providing deatiled description of this analysis and data used to implement this is provided: **Stunting_SAM/16S_DuodenalMicrobiome_MalZam_GuidanceDocument_Apr.docx**  
+62% of children with SAM were stunted but stunted children were not severely malnourished i.e severe wasting (WLZ < -3). The ASV counts and taxonomic identification from fastQ files was done by the WashU team. The code deposited here, details the analysis done to relate this data to metdata (clincal features for these children). A guidance document providing deatiled description of this analysis and data used to implement this is provided: **Stunting_SAM/16S_DuodenalMicrobiome_MalZam_GuidanceDocument_Aug.docx**  
 
 ## Meta-Analysis of Duodenal Microbiome of stunted children.
 Publicly available fastq files (16S) of the duodenal microbiome were retrieved from SRA archive and compared with the Zambian dataset to understand if geography had an impact of the compositon and diversity. This analysis was restried to children with LAZ < -2. 
-A guidance document providing deatiled description of this analysis and data used to implement this is provided: **Meta-Analysis/16S_DuodenalMicrobiome_Meta-Analysis_GuidanceDocument_Apr.docx**  
+A guidance document providing deatiled description of this analysis and data used to implement this is provided: **Meta-Analysis/16S_DuodenalMicrobiome_Meta-Analysis_GuidanceDocument_Aug.docx**  
 The scripts for filtering primers, and DADA2 implementaton are only modified to run on a local compture instead of HPC. All other parameters were not modified and is synonymous to the original scripts: https://gitlab.com/Gordon_Lab/amplicon_sequencing_pipeline
