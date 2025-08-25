@@ -1,0 +1,275 @@
+---
+title: "Create phyloseq object for Afrobiota and Bangaldesh data"
+---
+Set working directory
+```{r setup}
+   knitr::opts_knit$set(root.dir = normalizePath("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis")) 
+   #knitr::opts_knit$set(root.dir = normalizePath("C:/Users/Monica/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis")) 
+```
+
+
+Creating absolute abundance tables excluding the acyclobacillus
+
+```{r}
+rm(list=ls())
+
+# Load libraries
+library("phyloseq") # version "1.44.0" 
+library("tidyverse") # version "2.0.0" 
+library("dada2") # version "1.28.0" 
+library("msa") # version "1.32.0" 
+library("ips") # version "0.0.11" 
+library("phangorn")  # version "2.11.1" 
+library("vegan")  # version "2.6.4" 
+library("plyr")  # version "1.8.9" 
+library("DESeq2")  # version "1.40.2" 
+```
+
+
+Import data
+```{r}
+#count tables
+load("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/All_CountTab2025.RData") #Count table
+#Taxonomy tables
+load("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/All_TaxTab2025.RData") #Taxonomy table
+#metadata
+metadata <- readxl::read_excel("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/ExtDataMetadata_Jul14.xlsx")
+SamBeechMetadata <- read_csv("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/SamBeechMetadata_2.csv")
+```
+
+Create a basic mapping file and phyloseq object
+```{r}
+map <- data.frame(rownames(seqtab.nochim_all))
+colnames(map)[1] <- "sampleID"
+#join with sample data
+map2 <- full_join(SamBeechMetadata, metadata)
+map3 <- left_join(map, map2)
+
+#Make phyloseq object
+library(phyloseq)
+ps <- phyloseq(
+  tax_table(as.matrix(taxa.ext_all)),
+  sample_data(map3 %>% data.frame(row.names = 1)),
+  otu_table(seqtab.nochim_all, taxa_are_rows = FALSE)
+)
+ps_duod <- ps %>% ps_filter(SampleType != "Stool Sample") #remove stool samples from BEED study
+#phyloseq-class experiment-level object
+#otu_table()   OTU Table:         [ 4913 taxa and 207 samples ]
+#sample_data() Sample Data:       [ 207 samples by 13 sample variables]
+#tax_table()   Taxonomy Table:    [ 4913 taxa by 7 taxonomic ranks ]
+save(ps_duod, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/AllDatasets_NocleaningASV.RData")
+
+#remove the spike-in (Alicyclobacillus) reads in the BEECH, BEED and SEEM datasets 
+merged_phy_cl <- ps_duod %>% 
+  tax_select(tax_list = "Alicyclobacillus", strict_matches = FALSE, deselect = TRUE)
+#phyloseq-class experiment-level object
+#otu_table()   OTU Table:         [ 4763 taxa and 207 samples ]
+#sample_data() Sample Data:       [ 207 samples by 13 sample variables ]
+#tax_table()   Taxonomy Table:    [ 4763 taxa by 7 taxonomic ranks ]
+
+#remove bacteria with  
+ps0 = subset_taxa(merged_phy_cl, Kingdom == "Bacteria") # remove those with no taxonomic assignment
+ps0 = subset_taxa(ps0, Class != "Chloroplast") #remove those assigned as Chloroplast Class 
+ps0 = subset_taxa(ps0, Family != "Mitochondria") #remove those assigned as Mitochondria Family
+ps0 # reduced to 4412 taxa 
+
+save(ps0, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/AllDatasets_NoSpikeASV.RData")
+
+#Agglomerate at Genus level
+ps_duod_genus <- tax_glom(ps0, taxrank = "Genus", NArm = TRUE) #511 genera
+#Rename taxa with genus names
+genus.names <- make.names(tax_table(ps_duod_genus)[,'Genus'], unique = TRUE)
+taxa_names(ps_duod_genus) <- genus.names
+save(ps_duod_genus, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/AllDatasets_NoSpikeGen.RData")
+```
+
+Some PIDs in the bangladesh groups have multiple sequence outputs. Merge these
+```{r}
+#some PIDs have multiple SampleIDs
+ps0 %>%
+  tax_fix() %>%
+  ps_filter(Country == "Bangladesh")%>%
+  comp_barplot(tax_level = "Genus",
+               label = "PID",
+               n_taxa = 15) +
+  facet_grid(
+    cols = vars(PID),
+    scales = "free_x", # this only frees y scale per row in grid faceting
+    space = "free_x" # allows bars to be same size by freeing facet heights
+  ) +
+  theme(legend.position = "bottom",
+        axis.text.x = (element_blank()),
+        axis.ticks.x = (element_blank()))
+ggsave("Output/DescriptiveDat/Bangladesh_fullDataset_duplicated.png", plot = last_plot(), dpi = 600, device = "png", 
+       width = 18, height = 4, units = "in")
+
+#the duplicated PID's show similar genera abundance - Average them
+ps0.ra_unique <- phyloseq::merge_samples(ps0, "PID")
+# replace metadata as NAs get introduced during merging
+meta <- sample_data(ps0)
+merged_meta <- meta[!duplicated(meta$PID), ]
+merged_meta$sampleID2 <- rownames(merged_meta)
+rownames(merged_meta) <- NULL
+merged_meta2 <- merged_meta %>% column_to_rownames(var = "PID")
+sample_data(ps0.ra_unique) <- merged_meta2
+
+save(ps0.ra_unique, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/AllDatasets_RelAbundNoSpikeNoDuplicates.RData")
+
+```
+
+
+The BEECH, BEED and SEEM datasets were sequenced with a spike-in which can be used to determine absolute abundance. this was not done for the AFRIBIOTA data so excluded from this analysis
+This estimation was already estimated by Kazi for the BEECH and ME(EEBiomarker) dataset.
+
+
+Get absolute abundance of BEED and SEEM datasets and Combine with Zambian absolute abundance datasets
+```{r}
+#filter for duodenal BEECH, BEED and SEEM datasets only
+rm(list=ls())
+library(microViz)
+library(phyloseq)
+load("~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/AllDatasets_NocleaningASV.RData")
+
+ps_seem_beed <- ps_duod %>% ps_filter(study != "AFRIBIOTA") %>% ps_filter(SampleType != "Stool Sample")
+
+#Create ASVNames for this dataset
+tax_tab <- as.data.frame(tax_table(ps_seem_beed))
+otu_tab <- as.data.frame(otu_table(ps_seem_beed))
+sam_tab <- as.data.frame(sam_data(ps_seem_beed))
+ASVnames <- cbind(tax_tab,
+                  ASVSeq = rownames(tax_tab),
+                  ASVName = paste('ASV', 1:nrow(tax_tab), sep = ''),
+                  ASVTaxa = rep('', nrow(tax_tab)),
+                  ASVReadable = rep('', nrow(tax_tab)))
+ASVnames <- as.data.frame(ASVnames, stringsAsFactors = FALSE)
+
+### Get highest resolution taxonomic annotation
+for(i in 1:nrow(tax_tab)){
+  # Get annotation from silva plus
+  current_anno <- tax_tab[i, ]
+  # Figure out highest taxonomic resolution
+  highest_res <- current_anno[!is.na(current_anno)]
+  # Create a conditional to get species annotation, otherwise highest annotation possible
+  if(length(highest_res) == 7){
+    ASVnames$ASVTaxa[i] <- paste(highest_res[6], highest_res[7])
+  } else if(length(highest_res) > 1){
+    ASVnames$ASVTaxa[i] <- highest_res[length(highest_res)]
+  } else if(length(highest_res) == 1){
+    ASVnames$ASVTaxa[i] <- "Unannotated_bacteria"
+  } else if(length(highest_res) == 0){
+    ASVnames$ASVTaxa[i] <- 'Unannotated'
+  }
+}
+ASVnames$ASVReadable <- paste(ASVnames$ASVName, '_', ASVnames$ASVTaxa, sep = '')
+rownames(ASVnames) <- ASVnames$ASVReadable
+
+### Align asv with the new naming system
+all.equal(colnames(otu_tab), ASVnames$ASVSeq)
+colnames(otu_tab) <- rownames(ASVnames)
+
+ps_seem_beed2 <- phyloseq(
+  tax_table(as.matrix(ASVnames)),
+  sample_data(sam_tab),
+  otu_table(otu_tab, taxa_are_rows = FALSE)
+)
+#phyloseq-class experiment-level object
+#otu_table()   OTU Table:         [ 2731 taxa and 99 samples ]
+#sample_data() Sample Data:       [ 99 samples by 14 sample variables ]
+#tax_table()   Taxonomy Table:    [ 2731 taxa by 11 taxonomic ranks ]
+
+save(ps_seem_beed2, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/BEED_SEEM_BEECH_NoCleaning.RData")
+
+## 1. Convert ps to relative abundance
+ps.ra <- transform_sample_counts(ps_seem_beed2, function(x){x/sum(x)})
+
+## 2. Export ps.ra otu_table as data frame
+asv.ra <- as.data.frame(ps.ra@otu_table)
+
+## 3. Sum all spike-in ASVs from asv.ra
+# separate the spike-in ASVs from asv.ra
+# Identify columns containing "Alicyclobacillus" in their names
+cols_containing_alicyclobacillus <- grep("Alicyclobacillus", colnames(asv.ra))
+
+# Subset the matrix to include only these columns
+asv.ra.spike <- asv.ra[, cols_containing_alicyclobacillus] # 141 in total
+
+# Sum the values in each column
+asv.ra.spike$ASV_spike_ra_sum <- rowSums(asv.ra.spike)
+
+## 4. Calculate bacterial load ((1-spikein.ra)/spikein.ra)
+asv.ra.spike$bac_load_factor <- (1-asv.ra.spike$ASV_spike_ra_sum)/asv.ra.spike$ASV_spike_ra_sum  
+
+#### Data extracted form methods section of papers #######
+# The total amount of spike-in added to each sample 1.1*10^6 cells per 50 uL aspirate for SEEM
+# The total amount of spike-in added to each sample 1.1*10^6 cells per 100 uL aspirate for BEED
+# the total amount of spiek-in added to each sample 9.9*10^5 cells per 200 uL aspirate for BEECH
+# the total amount of spiek-in added to each sample 9.9*10^5 cells per 100 uL aspirate for ME
+asv.ra.spike$AAcellsAdded <- 1100000
+asv.ra.spike$AAcellsAdded[grep("BEECH", sam_tab$study)] <- 990000
+asv.ra.spike$AAcellsAdded[grep("ME", sam_tab$study)] <- 990000
+
+# multiplytoML: convert to mililiter
+asv.ra.spike$multiplytoML <- 20 #SEEM
+asv.ra.spike$multiplytoML[grep("BEED", sam_tab$study)] <- 10 #BEED and ME
+asv.ra.spike$multiplytoML[grep("ME", sam_tab$study)] <- 10 #BEED and ME
+asv.ra.spike$multiplytoML[grep("BEECH", sam_tab$study)] <- 5 #BEECH
+# Bacterial load
+asv.ra.spike$bac_load <- asv.ra.spike$bac_load_factor * (asv.ra.spike$multiplytoML * asv.ra.spike$AAcellsAdded)
+
+# Add bac_load to map file
+sample_data(ps_seem_beed2)$bacterial_load <- asv.ra.spike$bac_load
+sample_data(ps.ra)$bacterial_load <- asv.ra.spike$bac_load
+
+## 5. Make raw dataset excluding spike-in ASVs
+### i. Find all columns with spike-in
+spikeCols <- grep("Alicyclobacillus", names(otu_tab), value = TRUE)
+
+### ii. Create ps1 which have the spike-ins removed
+f1 <- !rownames(tax_table(ps_seem_beed2)@.Data) %in% spikeCols
+ps1 <- prune_taxa(f1, ps_seem_beed2)
+
+save(ps1, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/BEED_SEEM_BEECH_NoSpike.RData")
+
+##### Converting Phyloseq object to DeSeq object 
+## A DESeq normalization was applied to the dataset before absolute quantification calculation
+library(BiocGenerics)
+library("DESeq2") 
+dds.ps1 <- phyloseq_to_deseq2(ps1, ~ 1)
+dds.ps1 <- estimateSizeFactors(dds.ps1, type = 'poscounts')
+cts.ps1 <- counts(dds.ps1)
+dds.ps1 <- DESeq(dds.ps1, fitType="local")
+plotDispEsts(dds.ps1)
+
+###### Get absolute abundance of counts > transform to relative abundance
+ctsnorm.ps1 <- DESeq2::counts(dds.ps1, normalized = TRUE) %>% t()
+
+# Make new phyloseq object with normalized counts
+tax2 <- tax_table(ps1)
+map2 <- sample_data(ps1)
+
+ps_seem_beed2_norm <- phyloseq(
+  tax_table(as.matrix(tax2)),
+  sample_data(map2),
+  otu_table(ctsnorm.ps1, taxa_are_rows = FALSE)
+)
+
+save(ps_seem_beed2_norm, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/BEED_SEEM_BEECH_NoSpikeNorm.RData")
+
+# Transform to relative abundance
+ps_seem_beed2_norm.ra <- transform_sample_counts(ps_seem_beed2_norm, function(x){x/sum(x)})
+ctsnorm.ps2 <- as.data.frame(ps_seem_beed2_norm.ra@otu_table)
+
+# Absolute abunance of ASVs per ml of duodenal aspirate
+ctsnorm.ps2.abs <- sweep(ctsnorm.ps2, 1, FUN = '*', STATS = sample_data(ps_seem_beed2_norm.ra)$bacterial_load)
+
+#Save normalized and scaled dataset
+ps_SB_norm.ra.scaled <- phyloseq(
+  tax_table(as.matrix(tax2)),
+  sample_data(map2),
+  otu_table(ctsnorm.ps2.abs, taxa_are_rows = FALSE)
+)
+save(ps_SB_norm.ra.scaled, file = "~/Dropbox/PhD_Data/BEECH/BEECH_16s_Analysis/Meta-Analysis/Data/RData/BEED_SEEM_BEECH_AbsASV.RData")
+
+```
+
+#DONE!

@@ -1,0 +1,135 @@
+---
+title: "Afribiota - Filtering, Trimming, ASV Calling & Taxonomy Assignment"
+author: Monica
+Last updated: 01/01/2025
+*Adapted from https://benjjneb.github.io/dada2/tutorial.html*
+---
+
+Single Reads - Afribiota
+
+***Load packages***
+```{r}
+#BiocManager::install("dada2") #mm - to install the software
+library(dada2); packageVersion("dada2")
+```
+
+***Set path to fastq files***
+
+```{r}
+path <- "~/Desktop/fastQ/DADA2_Afribiota/fastq" # CHANGE ME to the directory containing the fastq files after unzipping.
+list.files(path)
+```
+
+Now we read in the names of the fastq files, and perform some string manipulation to get matched lists of the forward and reverse fastq files.
+
+```{r}
+fnFs <- sort(list.files(path, pattern=".fastq.gz", full.names = TRUE))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(basename(fnFs), ".fastq.gz"), `[`, 1)
+```
+
+***Inspect read quality profiles***
+
+We start by visualizing the quality profiles of the forward reads:
+```{r}
+plotQualityProfile(fnFs[1:2])
+```
+***Filter and trim***
+Assign the filenames for the filtered fastq.gz files.
+```{r}
+# Place filtered files in filtered/ subdirectory
+filtFs.new <- file.path(path, "filtered.new", paste0(sample.names, "_filt.new.fastq.gz"))
+
+names(filtFs.new) <- sample.names
+```
+
+```{r}
+out.new <- filterAndTrim(fnFs, filtFs.new, truncLen=c(200), maxN=c(0), maxEE=c(2), truncQ=c(2), rm.phix=TRUE, compress=TRUE, multithread=F) # On Windows set multithread=FALSE
+head(out.new)
+
+```
+
+***Learn the Error Rates***
+
+The following runs in about 3 minutes on a 2022 M2 Macbook :
+```{r}
+errF.new <- learnErrors(filtFs.new, multithread=F)
+```
+
+It is always worthwhile, as a sanity check if nothing else, to visualize the estimated error rates:
+```{r}
+plotErrors(errF.new, nominalQ=TRUE)
+```
+
+***Sample Inference***
+We are now ready to apply the core sample inference algorithm to the filtered and trimmed sequence data.
+```{r}
+dadaFs.new <- dada(filtFs.new, errF.new, multithread=F)
+```
+
+Inspecting the returned dada-class object:
+```{r}
+dadaFs.new[[1]]
+```
+
+***Construct sequence table***
+```{r}
+seqtab.new <- makeSequenceTable(dadaFs.new)
+dim(seqtab.new)
+```
+
+```{r}
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab.new)))
+```
+
+***Remove chimeras***
+```{r}
+seqtab.nochim.new <- removeBimeraDenovo(seqtab.new, method="consensus", multithread=F, verbose=TRUE)
+dim(seqtab.nochim.new)
+```
+
+```{r}
+sum(seqtab.nochim.new)/sum(seqtab.new)
+```
+
+***Track reads through the pipeline***
+As a final check of our progress, we’ll look at the number of reads that made it through each step in the pipeline:
+```{r}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out.new, sapply(dadaFs.new, getN), rowSums(seqtab.nochim.new))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "nonchim")
+rownames(track) <- sample.names
+head(track)
+```
+
+***Assign taxonomy*** ######## The output from taxonmy assignment below is not used as the taxonmy for all datasts ombined will be used instead
+```{r}
+#RC = TRUE
+taxa.new <- assignTaxonomy(seqs = seqtab.nochim.new, refFasta = "~/Dropbox/BEECH_16s_Analysis/Data/Tax/silva_nr99_v138.1_train_set.fa.gz", tryRC = T, multithread=F)
+```
+
+
+************* mm -- If you used the 'silva_nr99_v138.1_wSpecies_train_set.fa.gz' reference file, this step is not necessary.
+```{r}
+#RC = TRUE
+taxa.new2 <- addSpecies(taxtab = taxa.new, refFasta =  "~/Dropbox/BEECH_16s_Analysis/Data/Tax/silva_species_assignment_v138.1.fa.gz", tryRC = T)
+
+```
+
+Let’s inspect the taxonomic assignments:
+```{r}
+taxa.print <- taxa.new2 # Removing sequence rownames for display only
+rownames(taxa.print) <- NULL
+head(taxa.print)
+```
+
+***Save your data at this point***
+```{r}
+seqtab.nochim.afr <- seqtab.nochim.new
+taxa.afr <- taxa.new2
+save(seqtab.nochim.afr, file="~/Dropbox/BEECH_16s_Analysis/Meta-Analysis/Data/ExtDat_Afr_CountTab.RData") #Count table
+save(taxa.afr, file="~/Dropbox/BEECH_16s_Analysis/Meta-Analysis/Data/EXtDat_Afr_TaxTab.RData") #Taxonomy table
+```
+
